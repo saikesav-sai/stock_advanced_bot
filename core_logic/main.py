@@ -1,5 +1,6 @@
 import datetime
 import os
+import sys
 import threading
 import time
 from datetime import datetime, timedelta
@@ -7,6 +8,10 @@ from datetime import datetime, timedelta
 import upstox_client
 from dotenv import load_dotenv
 from LiveStrategyEngine import LiveStrategyEngine
+
+# Add parent directory to path for imports
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from telegram_bot.telegram_alerts import format_signal_message, send_telegram_alert
 
 load_dotenv()
 
@@ -55,6 +60,13 @@ def on_message(msg):
         
         if result:
             print(f"[{symbol}] SIGNAL:", result)
+            
+            # Send Telegram alert
+            try:
+                telegram_message = format_signal_message(symbol, result)
+                send_telegram_alert(telegram_message)
+            except Exception as e:
+                print(f"[{symbol}] Error sending Telegram alert: {e}")
 
 
 def start_streamer():

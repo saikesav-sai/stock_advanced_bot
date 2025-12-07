@@ -1,0 +1,22 @@
+# Stock Advanced Bot - Requirements
+# Python dependencies for the trading bot with Telegram integration
+
+# Core dependencies
+pandas>=2.0.0
+numpy>=1.24.0
+python-dotenv>=1.0.0
+requests>=2.31.0
+pytz>=2023.3
+
+# Upstox API
+upstox-python-sdk>=1.0.0
+
+# Telegram Bot
+python-telegram-bot>=20.7
+
+# Optional: For data visualization and analysis
+# matplotlib>=3.7.0
+# plotly>=5.14.0
+
+# Optional: For database operations (if needed)
+# sqlite3 (built-in)
