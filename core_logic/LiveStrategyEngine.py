@@ -9,6 +9,9 @@ import pytz
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from database_logic.candle_db import CandleDB
 from database_logic.fetch_historical_candles import UpstoxHistoricalFetcher
+from core_logic.logger_config import get_logger
+
+logger = get_logger()
 
 
 class LiveStrategyEngine:
@@ -76,12 +79,12 @@ class LiveStrategyEngine:
         start_date,end_date= self.fetch_last_2_working_days()
         df = self.db.get_candles(self.symbol, start_date=start_date, end_date=end_date, interval=os.getenv("INTERVAL", "5m"))
         self.db.cleanup_old_candles(days_to_keep=2)
-        print(f"[{self.symbol}] Historical data preview:")
-        print(df.tail(3))
+        logger.info(f"[{self.symbol}] Historical data preview:")
+        logger.info(f"[{self.symbol}] {df.tail(3).to_string()}")
     
          
         if not self.instrument_key:
-            print(f"[{self.symbol}] Warning: instrument_key not provided, cannot fetch historical data")
+            logger.warning(f"[{self.symbol}] Warning: instrument_key not provided, cannot fetch historical data")
             return
         
         # Fetch historical data
@@ -101,14 +104,14 @@ class LiveStrategyEngine:
             df["volume"] = pd.to_numeric(df["volume"], errors='coerce')
             
             self.df = df
-            print(f"[{self.symbol}] Loaded {len(self.df)} historical candles from database")
+            logger.info(f"[{self.symbol}] Loaded {len(self.df)} historical candles from database")
             
             # Calculate PDH/PDL from yesterday's data
             self.pdh, self.pdl = self.db.get_previous_day_high_low(self.symbol, today)
             if self.pdh and self.pdl:
-                print(f"[{self.symbol}] PDH: {self.pdh}, PDL: {self.pdl}")
+                logger.info(f"[{self.symbol}] PDH: {self.pdh}, PDL: {self.pdl}")
         else:
-            print(f"[{self.symbol}] No historical data available")
+            logger.info(f"[{self.symbol}] No historical data available")
     
     def _save_completed_candle(self, candle_data):
         """Save a completed candle to the database"""
@@ -124,7 +127,7 @@ class LiveStrategyEngine:
                 interval='1m'
             )
         except Exception as e:
-            print(f"[{self.symbol}] Error saving candle to DB: {e}")
+            logger.error(f"[{self.symbol}] Error saving candle to DB: {e}")
 
     # ---------------------------------------------
     # Update candle from live tick
@@ -158,11 +161,8 @@ class LiveStrategyEngine:
             self.current_minute = minute_ts
             # Ensure numeric types
             self.df.loc[len(self.df)] = [minute_ts, float(price), float(price), float(price), float(price), float(vol)]
-            print(f"[{self.symbol}] New candle created | df length: {len(self.df)} | Time: {minute_ts}")
-            sys.stdout.flush()
-            print(f"[{self.symbol}] Last 3 candles:")
-            print(self.df.tail(3))
-            sys.stdout.flush()
+            logger.info(f"[{self.symbol}] New candle created | df length: {len(self.df)} | Time: {minute_ts}")
+            logger.info(f"[{self.symbol}] Last 3 candles: {self.df.tail(3).to_string()}")
         else:
             # Update candle
             idx = self.df.index[-1]
@@ -171,18 +171,15 @@ class LiveStrategyEngine:
             self.df.at[idx, "close"] = price
             self.df.at[idx, "volume"] += vol
 
-        sys.stdout.flush()
         return self.process_strategy()
 
     
     def process_strategy(self):
         if len(self.df) < 210:
-            print(f"[{self.symbol}] Not enough data for strategy processing ({len(self.df)}/210 candles)")
-            sys.stdout.flush()
+            logger.info(f"[{self.symbol}] Not enough data for strategy processing ({len(self.df)}/210 candles)")
             return None
 
         df = self.df.copy()
-        sys.stdout.flush()
         
         # Date change reset
         cur_date = df.iloc[-1]["timestamp"].date()
@@ -208,7 +205,6 @@ class LiveStrategyEngine:
         
         
         
-        sys.stdout.flush()
 
         row = df.iloc[-1]
         prev = df.iloc[-2]
@@ -222,8 +218,6 @@ class LiveStrategyEngine:
             vol_ok = False
         else:
             vol_ok = row.volume > row.VolMA * self.VOL_MULT
-        # print("Volume:", row.volume, "VolMA:", row.VolMA, "vol_ok:", vol_ok)
-        sys.stdout.flush()
         # VWAP distance
         dist_pct = abs(row.close - row.VWAP) / row.VWAP * 100
         vwap_ok = dist_pct >= self.VWAP_DIST
@@ -231,7 +225,6 @@ class LiveStrategyEngine:
         # Trend
         uptrend = row.close > row.EMA200
         downtrend = row.close < row.EMA200
-        sys.stdout.flush()
 
         # Breakouts
         long_break = self.pdh is not None and row.close > self.pdh and prev.close <= self.pdh

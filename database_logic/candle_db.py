@@ -6,6 +6,10 @@ from typing import Dict, List, Optional
 
 import pandas as pd
 
+from core_logic.logger_config import get_logger
+
+logger = get_logger()
+
 
 class CandleDB:
     def __init__(self, db_path="market_data.db"):
@@ -41,7 +45,7 @@ class CandleDB:
         """)
         
         self.conn.commit()
-        print(f"Database initialized: {self.db_path}")
+        logger.info(f"Database initialized: {self.db_path}")
     
     def insert_candle(self, symbol: str, timestamp: datetime, 
                      open_price: float, high: float, low: float, 
@@ -93,7 +97,7 @@ class CandleDB:
         """, data)
         
         self.conn.commit()
-        print(f"Inserted {len(candles)} candles")
+        logger.info(f"Inserted {len(candles)} candles")
     
     def get_candles(self, symbol: str, start_date:str = None, 
                    end_date: str = None, interval: str = os.getenv("INTERVAL", "5m")) -> pd.DataFrame:
@@ -154,7 +158,7 @@ class CandleDB:
         deleted = cursor.rowcount
         self.conn.commit()
         
-        print(f"Cleaned up {deleted} old candles (before {cutoff_date})")
+        logger.info(f"Cleaned up {deleted} old candles (before {cutoff_date})")
         return deleted
     
     def get_latest_candle(self, symbol: str, interval: str = os.getenv("INTERVAL", "5m")) -> Optional[Dict]:
@@ -205,7 +209,7 @@ class CandleDB:
         """Close database connection"""
         if self.conn:
             self.conn.close()
-            print("Database connection closed")
+            logger.info("Database connection closed")
 
 
 # if __name__ == "__main__":

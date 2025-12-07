@@ -2,8 +2,16 @@
 Telegram Alerts Module
 Sends trading signals and alerts to configured Telegram chat IDs
 """
+import os
+import sys
+
 import requests
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from core_logic.logger_config import get_logger
 from telegram_bot.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_IDS
+
+logger = get_logger()
 
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
 
@@ -19,11 +27,11 @@ def send_telegram_alert(text, parse_mode="Markdown"):
         bool: True if at least one message was sent successfully
     """
     if not TELEGRAM_CHAT_IDS:
-        print("[TELEGRAM] No chat IDs configured. Set TELEGRAM_CHAT_IDS in .env")
+        logger.warning("[TELEGRAM] No chat IDs configured. Set TELEGRAM_CHAT_IDS in .env")
         return False
     
     if not TELEGRAM_BOT_TOKEN:
-        print("[TELEGRAM] Bot token not configured. Set TELEGRAM_BOT_TOKEN in .env")
+        logger.warning("[TELEGRAM] Bot token not configured. Set TELEGRAM_BOT_TOKEN in .env")
         return False
     
     success_count = 0
@@ -38,13 +46,13 @@ def send_telegram_alert(text, parse_mode="Markdown"):
         try:
             r = requests.post(TELEGRAM_API, json=payload, timeout=10)
             r.raise_for_status()
-            print(f"[TELEGRAM] ✓ Message sent to chat_id: {chat_id}")
+            logger.info(f"[TELEGRAM] ✓ Message sent to chat_id: {chat_id}")
             success_count += 1
         except Exception as e:
-            print(f"[TELEGRAM] ✗ Failed to send to chat_id {chat_id}: {e}")
+            logger.error(f"[TELEGRAM] ✗ Failed to send to chat_id {chat_id}: {e}")
             fail_count += 1
     
-    print(f"[TELEGRAM] Summary: {success_count} sent, {fail_count} failed")
+    logger.info(f"[TELEGRAM] Summary: {success_count} sent, {fail_count} failed")
     return success_count > 0
 
 

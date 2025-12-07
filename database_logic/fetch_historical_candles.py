@@ -4,10 +4,15 @@ from datetime import datetime, timedelta
 
 import pytz
 import requests
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from database_logic.candle_db import CandleDB
 from dotenv import load_dotenv
+from core_logic.logger_config import get_logger
 
 load_dotenv()
+
+logger = get_logger()
 
 # IST timezone
 IST = pytz.timezone('Asia/Kolkata')
@@ -44,27 +49,27 @@ class UpstoxHistoricalFetcher:
             
             # Skip weekends
             if target_date.weekday() >= 5:  # Saturday=5, Sunday=6
-                print(f"Skipping weekend: {target_date}")
+                logger.info(f"Skipping weekend: {target_date}")
                 continue
             
-            print(f"\nFetching candles for {target_date}...")
+            logger.info(f"Fetching candles for {target_date}...")
             
             candles = self._fetch_single_day(instrument_key, target_date)
             
             if candles:
                 all_candles.extend(candles)
                 trading_days_found += 1
-                print(f"  ✓ Fetched {len(candles)} candles for {target_date} (Trading day {trading_days_found}/{days})")
+                logger.info(f"✓ Fetched {len(candles)} candles for {target_date} (Trading day {trading_days_found}/{days})")
             else:
-                print(f"  ✗ No candles found for {target_date}")
+                logger.warning(f"✗ No candles found for {target_date}")
         
-        print("Fetching todays candles...  ")
+        logger.info("Fetching todays candles...")
         candles_today = self._fetch_today(instrument_key)
         if candles_today:
             all_candles.extend(candles_today)
-            print(f"  ✓ Fetched {len(candles_today)} candles for today ({today})")
+            logger.info(f"✓ Fetched {len(candles_today)} candles for today ({today})")
         else:
-            print(f"  ✗ No candles found for today ({today})")
+            logger.warning(f"✗ No candles found for today ({today})")
         
 
         # Store in database
@@ -77,9 +82,9 @@ class UpstoxHistoricalFetcher:
                 candle['symbol'] = symbol
             
             self.db.insert_candles_batch(all_candles)
-            print(f"\n✓ Total {len(all_candles)} candles stored in database")
+            logger.info(f"✓ Total {len(all_candles)} candles stored in database")
         else:
-            print("\n✗ No candles to store")
+            logger.warning("✗ No candles to store")
         
         return all_candles
     
@@ -138,14 +143,14 @@ class UpstoxHistoricalFetcher:
                     
                     return candles
                 else:
-                    print(f"  Error: {data.get('message', 'Unknown error')}")
+                    logger.error(f"Error: {data.get('message', 'Unknown error')}")
                     return []
             
             elif response.status_code == 401:
-                print(f"  Error: Unauthorized - Check your access token")
+                logger.error("Error: Unauthorized - Check your access token")
                 return []
         except Exception as e:
-            print(f"  Exception: {e}")
+            logger.error(f"Exception: {e}")
             return []
 
     def _fetch_single_day(self, instrument_key: str, date: datetime.date):
@@ -203,19 +208,19 @@ class UpstoxHistoricalFetcher:
                     
                     return candles
                 else:
-                    print(f"  Error: {data.get('message', 'Unknown error')}")
+                    logger.error(f"Error: {data.get('message', 'Unknown error')}")
                     return []
             
             elif response.status_code == 401:
-                print(f"  Error: Unauthorized - Check your access token")
+                logger.error("Error: Unauthorized - Check your access token")
                 return []
             
             else:
-                print(f"  Error: {response.status_code} - {response.text}")
+                logger.error(f"Error: {response.status_code} - {response.text}")
                 return []
         
         except Exception as e:
-            print(f"  Exception: {e}")
+            logger.error(f"Exception: {e}")
             return []
     
     def close(self):
@@ -226,10 +231,10 @@ class UpstoxHistoricalFetcher:
 def main():
 
     SYMBOL = os.getenv("SYMBOLS")
-    print(SYMBOL)
-    print("="*80)
-    print("Upstox Historical Candle Fetcher")
-    print("="*80)
+    logger.info(SYMBOL)
+    logger.info("="*80)
+    logger.info("Upstox Historical Candle Fetcher")
+    logger.info("="*80)
     
     fetcher = UpstoxHistoricalFetcher()
     
@@ -237,20 +242,20 @@ def main():
     candles = fetcher.fetch_and_store_candles(SYMBOL, days=2)
     
     # Show stats
-    print("\n" + "="*80)
-    print("Database Stats:")
-    print("="*80)
+    logger.info("="*80)
+    logger.info("Database Stats:")
+    logger.info("="*80)
     stats = fetcher.db.get_stats()
     for key, value in stats.items():
-        print(f"  {key}: {value}")
+        logger.info(f"  {key}: {value}")
     
     # Test PDH/PDL calculation
     today = datetime.now().strftime("%Y-%m-%d")
     symbol = SYMBOL.split("|")[1]
     
     pdh, pdl = fetcher.db.get_previous_day_high_low(symbol, today)
-    print(f"\nPrevious Day High (PDH): {pdh}")
-    print(f"Previous Day Low (PDL): {pdl}")
+    logger.info(f"Previous Day High (PDH): {pdh}")
+    logger.info(f"Previous Day Low (PDL): {pdl}")
     
     fetcher.close()
 
