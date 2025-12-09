@@ -100,7 +100,7 @@ def main():
     thread = threading.Thread(target=start_streamer, daemon=True)
 
     logger.info("Waiting for next minute to start streamer...")
-    wait_next_minute()
+    # wait_next_minute()
     thread.start()
 
     logger.info("Streaming... Press CTRL+C to stop")
