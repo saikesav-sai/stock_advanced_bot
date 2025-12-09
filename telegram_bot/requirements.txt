@@ -11,8 +11,8 @@ pytz>=2023.3
 # Upstox API
 upstox-python-sdk>=1.0.0
 
-# Telegram Bot
-python-telegram-bot>=20.7
+# Telegram Bot (with job queue for scheduling)
+python-telegram-bot[job-queue]>=20.7
 
 # Optional: For data visualization and analysis
 # matplotlib>=3.7.0

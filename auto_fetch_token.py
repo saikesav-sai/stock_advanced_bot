@@ -22,7 +22,7 @@ auth_code = None
 
 
 def update_env_token(token):
-    env_file = ".env"
+    env_file = "../.env"
     lines = []
     with open(env_file, "r") as f:
         lines = f.readlines()
