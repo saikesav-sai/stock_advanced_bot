@@ -7,9 +7,9 @@ import pandas as pd
 import pytz
 
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from core_logic.logger_config import get_logger
 from database_logic.candle_db import CandleDB
 from database_logic.fetch_historical_candles import UpstoxHistoricalFetcher
-from core_logic.logger_config import get_logger
 
 logger = get_logger()
 
@@ -51,13 +51,13 @@ class LiveStrategyEngine:
         self.trade_start = 915
         self.trade_end = 1525
 
-    def fetch_last_2_working_days(self):
-        """Fetch the last 2 working days as strings in 'YYYY-MM-DD' format"""
+    def fetch_last_3_working_days(self):
+        """Fetch the last 3 working days as strings in 'YYYY-MM-DD' format"""
         today = datetime.now().date()
         working_days = []
         day_offset = 1  # Start from yesterday
 
-        while len(working_days) < 2:
+        while len(working_days) < int(os.getenv("STOCK_DAYS_NEED", "3")):
             target_date = today - timedelta(days=day_offset)
             day_offset += 1
 
@@ -75,10 +75,11 @@ class LiveStrategyEngine:
         today = datetime.now().strftime("%Y-%m-%d")
         
 
-        # Try to load last 2 working days of candles from DB 
-        start_date,end_date= self.fetch_last_2_working_days()
+        # Try to load last 3 working days of candles from DB 
+        start_date,end_date= self.fetch_last_3_working_days()
+        self.db.cleanup_old_candles(days_to_keep=int(os.getenv("STOCK_DAYS_NEED", "3")))
         df = self.db.get_candles(self.symbol, start_date=start_date, end_date=end_date, interval=os.getenv("INTERVAL", "5m"))
-        self.db.cleanup_old_candles(days_to_keep=2)
+        
         logger.info(f"[{self.symbol}] Historical data preview:")
         logger.info(f"[{self.symbol}] {df.tail(3).to_string()}")
     
@@ -89,7 +90,7 @@ class LiveStrategyEngine:
         
         # Fetch historical data
         fetcher = UpstoxHistoricalFetcher()
-        fetcher.fetch_and_store_candles(self.instrument_key, days=2)
+        fetcher.fetch_and_store_candles(self.instrument_key, days=int(os.getenv("STOCK_DAYS_NEED", "3")))
         fetcher.close()
         
         # Reload from DB
@@ -124,7 +125,7 @@ class LiveStrategyEngine:
                 low=candle_data['low'],
                 close=candle_data['close'],
                 volume=candle_data['volume'],
-                interval='1m'
+                interval='5m'
             )
         except Exception as e:
             logger.error(f"[{self.symbol}] Error saving candle to DB: {e}")
@@ -142,9 +143,11 @@ class LiveStrategyEngine:
         price = tick["marketFF"]["ltpc"]["ltp"]
         vol = int(tick["marketFF"]["ltpc"]["ltq"])
 
+        # Round timestamp to nearest 5-minute interval
         minute_ts = ts.replace(second=0, microsecond=0)
+        minute_ts = minute_ts.replace(minute=(minute_ts.minute // 5) * 5)
 
-        # NEW MINUTE → create candle
+        # every 5 minutes create new candle
         if self.current_minute != minute_ts:
             # Save the previous completed candle to DB
             if self.current_minute is not None and len(self.df) > 0:
@@ -161,7 +164,7 @@ class LiveStrategyEngine:
             self.current_minute = minute_ts
             # Ensure numeric types
             self.df.loc[len(self.df)] = [minute_ts, float(price), float(price), float(price), float(price), float(vol)]
-            logger.info(f"[{self.symbol}] New candle created | df length: {len(self.df)} | Time: {minute_ts}")
+            logger.info(f"[{self.symbol}] New 5-min candle created | df length: {len(self.df)} | Time: {minute_ts}")
             logger.info(f"[{self.symbol}] Last 3 candles: {self.df.tail(3).to_string()}")
         else:
             # Update candle

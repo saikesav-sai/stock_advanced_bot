@@ -102,7 +102,7 @@ class UpstoxHistoricalFetcher:
         # URL encode the instrument key
         encoded_key = requests.utils.quote(instrument_key, safe='')
         
-        url = f"{self.base_url}/intraday/{encoded_key}/minutes/1/"
+        url = f"{self.base_url}/intraday/{encoded_key}/minutes/{os.getenv('INTERVAL')}/"
         
         headers = {
             'Content-Type': 'application/json',
@@ -138,7 +138,7 @@ class UpstoxHistoricalFetcher:
                             'low': float(candle[3]),
                             'close': float(candle[4]),
                             'volume': int(candle[5]),
-                            'interval': '1m'
+                            'interval': os.getenv('INTERVAL')
                         })
                     
                     return candles
@@ -155,7 +155,7 @@ class UpstoxHistoricalFetcher:
 
     def _fetch_single_day(self, instrument_key: str, date: datetime.date):
         """
-        Fetch 1-minute candles for a single day
+        Fetch n-minute candles for a single day
         
         Upstox API format: /instrument_key/interval/to_date/from_date
         Example: /NSE_EQ|INE467B01029/minutes/1/2025-01-02/2025-01-01
@@ -167,7 +167,7 @@ class UpstoxHistoricalFetcher:
         # URL encode the instrument key
         encoded_key = requests.utils.quote(instrument_key, safe='')
         
-        url = f"{self.base_url}/{encoded_key}/minutes/1/{to_date}/{from_date}"
+        url = f"{self.base_url}/{encoded_key}/minutes/{os.getenv('INTERVAL')}/{to_date}/{from_date}"
         
         headers = {
             'Content-Type': 'application/json',
@@ -203,7 +203,7 @@ class UpstoxHistoricalFetcher:
                             'low': float(candle[3]),
                             'close': float(candle[4]),
                             'volume': int(candle[5]),
-                            'interval': '1m'
+                            'interval': os.getenv('INTERVAL')
                         })
                     
                     return candles

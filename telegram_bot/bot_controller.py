@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.constants import ParseMode
 from telegram.ext import (Application, CallbackQueryHandler, CommandHandler,
                           ContextTypes, ConversationHandler, MessageHandler,
                           filters)
@@ -136,20 +137,20 @@ class TradingBotController:
         symbols = self.get_symbols()
         env_vars = self.read_env()
         
-        status_msg = f"🤖 *Trading Bot Status*\n\n"
+        status_msg = f"🤖 <b>Trading Bot Status</b>\n\n"
         status_msg += f"Status: {'🟢 Running' if trading_status == 'running' else '🔴 Stopped'}\n\n"
-        status_msg += f"📊 *Tracked Stocks ({len(symbols)}):*\n"
+        status_msg += f"📊 <b>Tracked Stocks ({len(symbols)}):</b>\n"
         
         if symbols:
             for i, symbol in enumerate(symbols, 1):
-                status_msg += f"{i}. `{symbol}`\n"
+                status_msg += f"{i}. <code>{symbol}</code>\n"
         else:
-            status_msg += "_No stocks configured_\n"
+            status_msg += "<i>No stocks configured</i>\n"
         
-        status_msg += f"\n⚙️ *Configuration:*\n"
-        status_msg += f"Interval: `{env_vars.get('INTERVAL', '1m')}`\n"
-        status_msg += f"EMA Length: `{env_vars.get('EMA_LENGTH', '200')}`\n"
-        status_msg += f"Risk/Reward: `{env_vars.get('RISK_REWARD', '1.6')}`\n"
+        status_msg += f"\n⚙️ <b>Configuration:</b>\n"
+        status_msg += f"Interval: <code>{env_vars.get('INTERVAL', '1m')}</code>\n"
+        status_msg += f"EMA Length: <code>{env_vars.get('EMA_LENGTH', '200')}</code>\n"
+        status_msg += f"Risk/Reward: <code>{env_vars.get('RISK_REWARD', '1.6')}</code>\n"
         
         return status_msg
 
@@ -188,14 +189,14 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     welcome_msg = (
-        "🤖 *Stock Trading Bot Controller*\n\n"
+        "🤖 <b>Stock Trading Bot Controller</b>\n\n"
         "Welcome! Use the buttons below to control your trading bot.\n\n"
         "• Start/Stop the trading program\n"
         "• Manage your stock watchlist\n"
         "• View configuration and status"
     )
     
-    await update.message.reply_text(welcome_msg, reply_markup=reply_markup, parse_mode="Markdown")
+    await update.message.reply_text(welcome_msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle button callbacks"""
@@ -213,33 +214,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "start_bot":
         success, message = controller.start_trading()
         await query.edit_message_text(
-            f"{message}\n\nUse /menu to return to main menu.",
-            parse_mode="Markdown"
+            f"{message}\n\nUse /menu to return to main menu."
         )
     
     elif data == "stop_bot":
         success, message = controller.stop_trading()
         await query.edit_message_text(
-            f"{message}\n\nUse /menu to return to main menu.",
-            parse_mode="Markdown"
+            f"{message}\n\nUse /menu to return to main menu."
         )
     
     elif data == "status":
         status_msg = controller.get_status()
         keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(status_msg, reply_markup=reply_markup, parse_mode="Markdown")
+        await query.edit_message_text(status_msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     
     elif data == "stocks_menu":
         symbols = controller.get_symbols()
-        msg = f"📈 *Stock Management*\n\n"
+        msg = f"📈 <b>Stock Management</b>\n\n"
         msg += f"Current stocks ({len(symbols)}):\n"
         
         if symbols:
             for i, symbol in enumerate(symbols, 1):
-                msg += f"{i}. `{symbol}`\n"
+                msg += f"{i}. <code>{symbol}</code>\n"
         else:
-            msg += "_No stocks configured_\n"
+            msg += "<i>No stocks configured</i>\n"
         
         keyboard = [
             [
@@ -249,15 +248,15 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             [InlineKeyboardButton("🔙 Back", callback_data="main_menu")]
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode="Markdown")
+        await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     
     elif data == "add_stock":
         await query.edit_message_text(
-            "➕ *Add New Stock*\n\n"
+            "➕ <b>Add New Stock</b>\n\n"
             "Send the instrument key in format:\n"
-            "`NSE_EQ|INE467B01029`\n\n"
+            "<code>NSE_EQ|INE467B01029</code>\n\n"
             "Or send /cancel to go back.",
-            parse_mode="Markdown"
+            parse_mode=ParseMode.HTML
         )
         return ADDING_STOCK
     
@@ -265,8 +264,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         symbols = controller.get_symbols()
         if not symbols:
             await query.edit_message_text(
-                "No stocks to remove.\n\nUse /menu to return.",
-                parse_mode="Markdown"
+                "No stocks to remove.\n\nUse /menu to return."
             )
             return ConversationHandler.END
         
@@ -277,9 +275,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "➖ *Remove Stock*\n\nSelect a stock to remove:",
+            "➖ <b>Remove Stock</b>\n\nSelect a stock to remove:",
             reply_markup=reply_markup,
-            parse_mode="Markdown"
+            parse_mode=ParseMode.HTML
         )
     
     elif data.startswith("rm_"):
@@ -288,18 +286,16 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         if success:
             await query.edit_message_text(
-                f"✅ {message}\n\nUse /menu to return to main menu.",
-                parse_mode="Markdown"
+                f"✅ {message}\n\nUse /menu to return to main menu."
             )
         else:
             await query.edit_message_text(
-                f"❌ {message}\n\nUse /menu to return to main menu.",
-                parse_mode="Markdown"
+                f"❌ {message}\n\nUse /menu to return to main menu."
             )
     
     elif data == "config":
         env_vars = controller.read_env()
-        msg = "⚙️ *Current Configuration*\n\n"
+        msg = "⚙️ <b>Current Configuration</b>\n\n"
         
         config_items = {
             'INTERVAL': 'Candle Interval',
@@ -315,31 +311,31 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         
         for key, label in config_items.items():
             value = env_vars.get(key, 'Not set')
-            msg += f"• {label}: `{value}`\n"
+            msg += f"• {label}: <code>{value}</code>\n"
         
         keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode="Markdown")
+        await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     
     elif data == "help":
         help_msg = (
-            "❓ *Help & Commands*\n\n"
-            "*Main Features:*\n"
+            "❓ <b>Help &amp; Commands</b>\n\n"
+            "<b>Main Features:</b>\n"
             "• Start/Stop - Control the trading bot\n"
             "• Status - View bot status and stocks\n"
             "• Stocks - Add/remove stocks from watchlist\n"
             "• Config - View trading parameters\n\n"
-            "*Commands:*\n"
+            "<b>Commands:</b>\n"
             "/start - Show main menu\n"
             "/menu - Return to main menu\n"
             "/status - Quick status check\n\n"
-            "*Stock Format:*\n"
-            "Use format: `EXCHANGE|ISIN`\n"
-            "Example: `NSE_EQ|INE467B01029`"
+            "<b>Stock Format:</b>\n"
+            "Use format: <code>EXCHANGE|ISIN</code>\n"
+            "Example: <code>NSE_EQ|INE467B01029</code>"
         )
         keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]]
         reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(help_msg, reply_markup=reply_markup, parse_mode="Markdown")
+        await query.edit_message_text(help_msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
     
     elif data == "main_menu":
         keyboard = [
@@ -358,9 +354,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
         reply_markup = InlineKeyboardMarkup(keyboard)
         await query.edit_message_text(
-            "🤖 *Stock Trading Bot Controller*\n\nSelect an option:",
+            "🤖 <b>Stock Trading Bot Controller</b>\n\nSelect an option:",
             reply_markup=reply_markup,
-            parse_mode="Markdown"
+            parse_mode=ParseMode.HTML
         )
 
 async def add_stock_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -376,10 +372,10 @@ async def add_stock_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # Validate format
     if '|' not in symbol or len(symbol.split('|')) != 2:
         await update.message.reply_text(
-            "❌ Invalid format. Use: `EXCHANGE|ISIN`\n"
-            "Example: `NSE_EQ|INE467B01029`\n\n"
+            "❌ Invalid format. Use: <code>EXCHANGE|ISIN</code>\n"
+            "Example: <code>NSE_EQ|INE467B01029</code>\n\n"
             "Try again or send /cancel",
-            parse_mode="Markdown"
+            parse_mode=ParseMode.HTML
         )
         return ADDING_STOCK
     
@@ -387,13 +383,11 @@ async def add_stock_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if success:
         await update.message.reply_text(
-            f"✅ {message}\n\nUse /menu to return to main menu.",
-            parse_mode="Markdown"
+            f"✅ {message}\n\nUse /menu to return to main menu."
         )
     else:
         await update.message.reply_text(
-            f"❌ {message}\n\nUse /menu to return to main menu.",
-            parse_mode="Markdown"
+            f"❌ {message}\n\nUse /menu to return to main menu."
         )
     
     return ConversationHandler.END
@@ -430,9 +424,9 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
     reply_markup = InlineKeyboardMarkup(keyboard)
     
     await update.message.reply_text(
-        "🤖 *Stock Trading Bot Controller*\n\nSelect an option:",
+        "🤖 <b>Stock Trading Bot Controller</b>\n\nSelect an option:",
         reply_markup=reply_markup,
-        parse_mode="Markdown"
+        parse_mode=ParseMode.HTML
     )
 
 async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -444,7 +438,7 @@ async def status_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     status_msg = controller.get_status()
-    await update.message.reply_text(status_msg, parse_mode="Markdown")
+    await update.message.reply_text(status_msg, parse_mode=ParseMode.HTML)
 
 def main():
     """Run the bot"""
@@ -468,6 +462,9 @@ def main():
             ADDING_STOCK: [MessageHandler(filters.TEXT & ~filters.COMMAND, add_stock_handler)],
         },
         fallbacks=[CommandHandler("cancel", cancel)],
+        per_message=False,
+        per_chat=True,
+        per_user=True,
     )
     
     # Add handlers
