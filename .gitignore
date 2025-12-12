@@ -3,3 +3,4 @@
 *.log
 **/__pycache__/
 /venv
+/stock_advanced_bot_env
