@@ -136,6 +136,15 @@ class TradingBotController:
         if trading_status == "running":
             return False, "Trading bot is already running"
         
+        # Check token validity before starting
+        token_manager = get_token_manager()
+        is_valid, token_message = token_manager.check_token_validity()
+        
+        if not is_valid:
+            error_msg = f"❌ Cannot start bot: Token is expired or invalid\n\n{token_message}\n\nPlease refresh your token using the Token menu."
+            logger.error(f"Cannot start bot - token invalid: {token_message}")
+            return False, error_msg
+        
         try:
             # Start the main.py script as a subprocess
             trading_process = subprocess.Popen(
@@ -730,6 +739,37 @@ async def check_token_daily(context: ContextTypes.DEFAULT_TYPE):
         )
         await notify_users(context.application, warning_msg)
 
+async def cleanup_database(context: ContextTypes.DEFAULT_TYPE):
+    """Delete old database and create a new one at the start of each day"""
+    try:
+        # Get the database path from the root folder
+        root_folder = Path(__file__).parent.parent
+        db_path = root_folder / 'market_data.db'
+        
+        # Check if database exists and delete it
+        if db_path.exists():
+            os.remove(db_path)
+            logger.info(f"Deleted old database: {db_path}")
+            
+            # Notify users
+            cleanup_msg = (
+                "🗑️ <b>Daily Database Cleanup</b>\n\n"
+                "Old market data database has been deleted.\n"
+                "A fresh database will be created when trading starts.\n\n"
+                f"Cleanup time: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            )
+            await notify_users(context.application, cleanup_msg)
+        else:
+            logger.info("No database file found to clean up")
+            
+    except Exception as e:
+        logger.error(f"Error during database cleanup: {e}")
+        error_msg = (
+            "⚠️ <b>Database Cleanup Error</b>\n\n"
+            f"Failed to delete old database: {str(e)}"
+        )
+        await notify_users(context.application, error_msg)
+
 async def check_trading_hours(context: ContextTypes.DEFAULT_TYPE):
     """Check if it's time to start or stop trading"""
     global trading_status
@@ -757,6 +797,11 @@ async def check_trading_hours(context: ContextTypes.DEFAULT_TYPE):
             logger.info("Auto-started trading bot at market open")
             await notify_users(context.application, 
                 f"⏰ <b>Auto-Start</b>\n\n{message}\n\nMarket hours have begun.")
+        else:
+            # Token validation failed - notify users
+            logger.warning(f"Failed to auto-start trading bot: {message}")
+            await notify_users(context.application,
+                f"⚠️ <b>Auto-Start Failed</b>\n\n{message}")
     
     # Auto-stop at trading end time
     elif current_time == end_time and trading_status == "running":
@@ -843,6 +888,14 @@ def main():
         # Check trading hours every minute
         app.job_queue.run_repeating(check_trading_hours, interval=60, first=10)
         logger.info("Scheduled auto-start/stop based on trading hours")
+        
+        # Clean up database daily at 12:01 AM
+        app.job_queue.run_daily(
+            cleanup_database,
+            time=dt_time(hour=0, minute=1),
+            days=(0, 1, 2, 3, 4, 5, 6)  # All days
+        )
+        logger.info("Scheduled daily database cleanup at 12:01 AM")
         
         # Check token validity daily at 8:30 AM
         app.job_queue.run_daily(

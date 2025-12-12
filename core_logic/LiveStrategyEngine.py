@@ -125,7 +125,7 @@ class LiveStrategyEngine:
                 low=candle_data['low'],
                 close=candle_data['close'],
                 volume=candle_data['volume'],
-                interval='5m'
+                interval='5'
             )
         except Exception as e:
             logger.error(f"[{self.symbol}] Error saving candle to DB: {e}")
