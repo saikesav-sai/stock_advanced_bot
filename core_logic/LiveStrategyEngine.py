@@ -43,9 +43,9 @@ class LiveStrategyEngine:
         # Strategy parameters
         self.EMA_LEN = 200
         self.VOL_LEN = 20 # set to 20
-        self.VOL_MULT = 1.5
-        self.RR = 1.6
-        self.VWAP_DIST = 0.15
+        self.VOL_MULT = 1.2  # Relaxed from 1.5 - only need 20% volume increase
+        self.RR = 1.2  # Relaxed from 1.6 - more achievable targets
+        self.VWAP_DIST = 0.05  # Relaxed from 0.15 - allow trades closer to VWAP
         self.SL_BUFFER = 0.08
 
         self.trade_start = 915
