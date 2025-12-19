@@ -48,7 +48,7 @@ class LiveStrategyEngine:
         self.VWAP_DIST = 0.05  # Relaxed from 0.15 - allow trades closer to VWAP
         self.SL_BUFFER = 0.08
 
-        self.trade_start = 915
+        self.trade_start = 930 #changed startup time 915 -> 930 
         self.trade_end = 1525
 
     def fetch_last_3_working_days(self):
