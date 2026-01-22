@@ -51,38 +51,13 @@ class LiveStrategyEngine:
         self.trade_start = 930 #changed startup time 915 -> 930 
         self.trade_end = 1525
 
-    def fetch_last_3_working_days(self):
-        """Fetch the last 3 working days as strings in 'YYYY-MM-DD' format"""
-        today = datetime.now().date()
-        working_days = []
-        day_offset = 1  # Start from yesterday
-
-        while len(working_days) < int(os.getenv("STOCK_DAYS_NEED", "3")):
-            target_date = today - timedelta(days=day_offset)
-            day_offset += 1
-
-            # Skip weekends
-            if target_date.weekday() >= 5:  # Saturday=5, Sunday=6
-                continue
-
-            working_days.append(target_date.strftime("%Y-%m-%d"))
-
-        working_days.reverse()  # Earliest date first
-        return working_days[0], working_days[-1]
-
     def _load_historical_data(self):
         """Load historical candles from database, fetch if not found"""
         today = datetime.now().strftime("%Y-%m-%d")
         
 
-        # Try to load last 3 working days of candles from DB 
-        start_date,end_date= self.fetch_last_3_working_days()
+        # cleanup old candles
         self.db.cleanup_old_candles(days_to_keep=int(os.getenv("STOCK_DAYS_NEED", "3")))
-        df = self.db.get_candles(self.symbol, start_date=start_date, end_date=end_date, interval=os.getenv("INTERVAL", "5m"))
-        
-        logger.info(f"[{self.symbol}] Historical data preview:")
-        logger.info(f"[{self.symbol}] {df.tail(3).to_string()}")
-    
          
         if not self.instrument_key:
             logger.warning(f"[{self.symbol}] Warning: instrument_key not provided, cannot fetch historical data")
@@ -134,15 +109,13 @@ class LiveStrategyEngine:
     # Update candle from live tick
     # ---------------------------------------------
     def update_candle(self, tick):
-        ts = int(tick["marketFF"]["ltpc"]["ltt"]) // 1000
-        # Unix timestamp is always UTC, convert to IST as naive datetime
-        ts = datetime.utcfromtimestamp(ts)
-        # Add IST offset manually (UTC + 5:30)
-        from datetime import timedelta
-        ts = ts + timedelta(hours=5, minutes=30)
+        ts_raw = int(tick["marketFF"]["ltpc"]["ltt"])
         price = tick["marketFF"]["ltpc"]["ltp"]
         vol = int(tick["marketFF"]["ltpc"]["ltq"])
 
+        # Convert millisecond timestamp to datetime (timezone-naive)
+        ts = datetime.fromtimestamp(ts_raw / 1000)
+        
         # Round timestamp to nearest 5-minute interval
         minute_ts = ts.replace(second=0, microsecond=0)
         minute_ts = minute_ts.replace(minute=(minute_ts.minute // 5) * 5)
@@ -201,13 +174,6 @@ class LiveStrategyEngine:
         df["EMA200"] = df["close"].ewm(span=self.EMA_LEN).mean()
         df["VWAP"] = (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
         df["VolMA"] = df["volume"].rolling(self.VOL_LEN).mean()
-        
-        
-        
-        
-        
-        
-        
 
         row = df.iloc[-1]
         prev = df.iloc[-2]

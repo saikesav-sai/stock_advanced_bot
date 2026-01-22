@@ -5,7 +5,7 @@ from datetime import datetime, timedelta
 from typing import Dict, List, Optional
 
 import pandas as pd
-
+import pytz
 from core_logic.logger_config import get_logger
 
 logger = get_logger()
@@ -15,6 +15,7 @@ class CandleDB:
     def __init__(self, db_path="market_data.db"):
         self.db_path = db_path
         self.conn = None
+        self.IST = pytz.timezone('Asia/Kolkata')
         self._init_db()
     
     def _init_db(self):
@@ -53,13 +54,21 @@ class CandleDB:
         """Insert a single candle"""
         cursor = self.conn.cursor()
         
+        # If timestamp is naive, treat it as IST and convert to Unix timestamp
+        if timestamp.tzinfo is None:
+            # Localize naive datetime as IST, then convert to timestamp
+            timestamp_aware = self.IST.localize(timestamp)
+            unix_timestamp = int(timestamp_aware.timestamp())
+        else:
+            unix_timestamp = int(timestamp.timestamp())
+        
         cursor.execute("""
             INSERT OR REPLACE INTO candles 
             (symbol, timestamp, date, interval, open, high, low, close, volume)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
             symbol,
-            int(timestamp.timestamp()),
+            unix_timestamp,
             timestamp.strftime("%Y-%m-%d"),
             interval,
             open_price,

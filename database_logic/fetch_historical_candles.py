@@ -27,6 +27,25 @@ class UpstoxHistoricalFetcher:
         root_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
         db_path = os.path.join(root_folder, 'market_data.db')
         self.db = CandleDB(db_path=db_path)
+
+    def fetch_last_n_working_days(self,days):
+        """Fetch the last 3 working days as strings in 'YYYY-MM-DD' format"""
+        today = datetime.now().date()
+        working_days = []
+        day_offset = 1  # Start from yesterday
+
+        while len(working_days) < days:
+            target_date = today - timedelta(days=day_offset)
+            day_offset += 1
+
+            # Skip weekends
+            if target_date.weekday() >= 5:  # Saturday=5, Sunday=6
+                continue
+
+            working_days.append(target_date)
+
+        working_days.reverse()  # Earliest date first
+        return working_days
     
     def fetch_and_store_candles(self, instrument_key: str, days: int = 2):
         """
@@ -39,18 +58,10 @@ class UpstoxHistoricalFetcher:
         today = datetime.now().date()
         
         all_candles = []
-        trading_days_found = 0
-        day_offset = 1  # Start from yesterday
         
-        # Keep going back until we find 'days' trading days
-        while trading_days_found < days:
-            target_date = today - timedelta(days=day_offset)
-            day_offset += 1
-            
-            # Skip weekends
-            if target_date.weekday() >= 5:  # Saturday=5, Sunday=6
-                logger.info(f"Skipping weekend: {target_date}")
-                continue
+        working_dates = self.fetch_last_n_working_days(days)
+        
+        for target_date in working_dates:
             
             logger.info(f"Fetching candles for {target_date}...")
             
@@ -58,8 +69,7 @@ class UpstoxHistoricalFetcher:
             
             if candles:
                 all_candles.extend(candles)
-                trading_days_found += 1
-                logger.info(f"✓ Fetched {len(candles)} candles for {target_date} (Trading day {trading_days_found}/{days})")
+                logger.info(f"✓ Fetched {len(candles)} candles for {target_date} (Trading day {working_dates.index(target_date)+1}/{days})")
             else:
                 logger.warning(f"✗ No candles found for {target_date}")
         
