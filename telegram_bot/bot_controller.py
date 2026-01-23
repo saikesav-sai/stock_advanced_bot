@@ -164,7 +164,13 @@ class TradingBotController:
         
         try:
             # Start the main.py script as a subprocess
-            log_file = open("logs/trading_process.log", "a")
+            log_dir = Path(__file__).parent.parent / "logs"
+            log_dir.mkdir(parents=True, exist_ok=True)
+
+            log_file_path = log_dir / "trading_process.log"
+
+            log_file = open(log_file_path, "a")
+
             trading_process = subprocess.Popen(
                 [sys.executable, str(self.main_script)],
                 stdout=log_file,
