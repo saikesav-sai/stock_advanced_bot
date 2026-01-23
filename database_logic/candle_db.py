@@ -62,20 +62,21 @@ class CandleDB:
         else:
             unix_timestamp = int(timestamp.timestamp())
         
+        # Convert numpy types to native Python types for SQLite compatibility
         cursor.execute("""
             INSERT OR REPLACE INTO candles 
             (symbol, timestamp, date, interval, open, high, low, close, volume)
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """, (
-            symbol,
-            unix_timestamp,
+            str(symbol),
+            int(unix_timestamp),
             timestamp.strftime("%Y-%m-%d"),
-            interval,
-            open_price,
-            high,
-            low,
-            close,
-            volume
+            str(interval),
+            float(open_price),
+            float(high),
+            float(low),
+            float(close),
+            int(volume)
         ))
         
         self.conn.commit()
