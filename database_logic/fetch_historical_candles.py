@@ -68,6 +68,7 @@ class UpstoxHistoricalFetcher:
             candles = self._fetch_single_day(instrument_key, target_date)
             
             if candles:
+                candles.reverse()
                 all_candles.extend(candles)
                 logger.info(f"✓ Fetched {len(candles)} candles for {target_date} (Trading day {working_dates.index(target_date)+1}/{days})")
             else:
@@ -75,6 +76,7 @@ class UpstoxHistoricalFetcher:
         
         logger.info("Fetching todays candles...")
         candles_today = self._fetch_today(instrument_key)
+        candles_today.reverse()
         if candles_today:
             all_candles.extend(candles_today)
             logger.info(f"✓ Fetched {len(candles_today)} candles for today ({today})")
