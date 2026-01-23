@@ -33,9 +33,19 @@ ADDING_STOCK, REMOVING_STOCK, EXCHANGE_SELECTION, WAITING_AUTH_CODE = range(4)
 trading_process = None
 trading_status = "stopped"
 
-from telegram.error import TelegramError
+from telegram.error import NetworkError, TelegramError, TimedOut
+
 
 async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    """Handle errors in the telegram bot"""
+    error = context.error
+    
+    # Network errors are common and expected - just log them as warnings
+    if isinstance(error, (NetworkError, TimedOut)):
+        logger.warning(f"Network error occurred: {error.__class__.__name__}. Will retry automatically.")
+        return
+    
+    # For other errors, log the full exception
     logger.exception(
         "Unhandled exception while processing update",
         exc_info=context.error
@@ -877,8 +887,18 @@ def main():
         print("Error: AUTHORIZED_USERS not set in .env file")
         return
     
-    # Create application
-    app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    # Create application with connection pool settings for better reliability
+    app = (
+        Application.builder()
+        .token(TELEGRAM_BOT_TOKEN)
+        .connect_timeout(30.0)
+        .read_timeout(30.0)
+        .write_timeout(30.0)
+        .pool_timeout(30.0)
+        .get_updates_connect_timeout(30.0)
+        .get_updates_read_timeout(30.0)
+        .build()
+    )
     
     # Conversation handler for adding stocks
     stock_conv_handler = ConversationHandler(
