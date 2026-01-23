@@ -112,18 +112,18 @@ class LiveStrategyEngine:
         ts_raw = int(tick["marketFF"]["ltpc"]["ltt"])
         price = tick["marketFF"]["ltpc"]["ltp"]
         vol = int(tick["marketFF"]["ltpc"]["ltq"])
-
         # Convert millisecond timestamp to datetime (timezone-naive)
-        ts = datetime.fromtimestamp(ts_raw / 1000)
-        
+        ts = datetime.fromtimestamp(ts_raw /1000)
         # Round timestamp to nearest 5-minute interval
         minute_ts = ts.replace(second=0, microsecond=0)
         minute_ts = minute_ts.replace(minute=(minute_ts.minute // 5) * 5)
 
+        current_candle_time= self.df['timestamp'].iloc[-1] if len(self.df)>0 else None
+
         # every 5 minutes create new candle
-        if self.current_minute != minute_ts:
+        if current_candle_time != minute_ts:
             # Save the previous completed candle to DB
-            if self.current_minute is not None and len(self.df) > 0:
+            if current_candle_time is not None and len(self.df) > 0:
                 last_candle = self.df.iloc[-1]
                 self._save_completed_candle({
                     'timestamp': last_candle['timestamp'],
@@ -134,11 +134,13 @@ class LiveStrategyEngine:
                     'volume': last_candle['volume']
                 })
             
-            self.current_minute = minute_ts
-            # Ensure numeric types
-            self.df.loc[len(self.df)] = [minute_ts, float(price), float(price), float(price), float(price), float(vol)]
+            current_candle_time = minute_ts
             logger.info(f"[{self.symbol}] New 5-min candle created | df length: {len(self.df)} | Time: {minute_ts}")
             logger.info(f"[{self.symbol}] Last 3 candles: {self.df.tail(3).to_string()}")
+
+            # Creating new candle and Ensure numeric types
+            self.df.loc[len(self.df)] = [minute_ts, float(price), float(price), float(price), float(price), int(vol)]
+            
         else:
             # Update candle
             idx = self.df.index[-1]
