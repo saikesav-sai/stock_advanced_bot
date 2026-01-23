@@ -33,6 +33,23 @@ ADDING_STOCK, REMOVING_STOCK, EXCHANGE_SELECTION, WAITING_AUTH_CODE = range(4)
 trading_process = None
 trading_status = "stopped"
 
+from telegram.error import TelegramError
+
+async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE):
+    logger.exception(
+        "Unhandled exception while processing update",
+        exc_info=context.error
+    )
+
+    # Try to notify the user safely (optional)
+    try:
+        if update and hasattr(update, "effective_message") and update.effective_message:
+            await update.effective_message.reply_text(
+                "⚠️ An internal error occurred. Please try again."
+            )
+    except Exception:
+        pass
+
 class TradingBotController:
     def __init__(self):
         self.env_path = Path(__file__).parent.parent / ".env"
@@ -147,11 +164,11 @@ class TradingBotController:
         
         try:
             # Start the main.py script as a subprocess
+            log_file = open("logs/trading_process.log", "a")
             trading_process = subprocess.Popen(
                 [sys.executable, str(self.main_script)],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True
+                stdout=log_file,
+                stderr=log_file
             )
             trading_status = "running"
             logger.info("Trading bot started successfully")
@@ -254,271 +271,292 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle button callbacks"""
-    query = update.callback_query
-    user_id = query.from_user.id
-    
-    if not is_authorized(user_id):
-        await query.answer("❌ Not authorized", show_alert=True)
-        return ConversationHandler.END
-    
-    await query.answer()
-    
-    data = query.data
-    
-    if data == "start_bot":
-        success, message = controller.start_trading()
-        await query.edit_message_text(
-            f"{message}\n\nUse /menu to return to main menu."
-        )
-    
-    elif data == "stop_bot":
-        success, message = controller.stop_trading()
-        await query.edit_message_text(
-            f"{message}\n\nUse /menu to return to main menu."
-        )
-    
-    elif data == "status":
-        status_msg = controller.get_status()
-        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(status_msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-    
-    elif data == "stocks_menu":
-        symbols_with_names = controller.get_symbols_with_names()
-        msg = f"📈 <b>Stock Management</b>\n\n"
-        msg += f"Current stocks ({len(symbols_with_names)}):\n"
+    try:
+        query = update.callback_query
+        user_id = query.from_user.id
+
+        if not is_authorized(user_id):
+            await query.answer("❌ Not authorized", show_alert=True)
+            return ConversationHandler.END
+
+        await query.answer()
+        data = query.data
+        query = update.callback_query
+        user_id = query.from_user.id
         
-        if symbols_with_names:
-            for i, stock in enumerate(symbols_with_names, 1):
-                msg += f"{i}. <b>{stock['name']}</b> (<code>{stock['trading_symbol']}</code>) - {stock['exchange']}\n"
-        else:
-            msg += "<i>No stocks configured</i>\n"
-        
-        keyboard = [
-            [
-                InlineKeyboardButton("➕ Add Stock", callback_data="add_stock"),
-                InlineKeyboardButton("➖ Remove Stock", callback_data="remove_stock")
-            ],
-            [InlineKeyboardButton("🔙 Back", callback_data="main_menu")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-    
-    elif data == "add_stock":
-        keyboard = [
-            [InlineKeyboardButton("NSE", callback_data="exchange_NSE_EQ")],
-            [InlineKeyboardButton("BSE", callback_data="exchange_BSE_EQ")],
-            [InlineKeyboardButton("🔙 Cancel", callback_data="stocks_menu")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            "➕ <b>Add New Stock</b>\n\n"
-            "First, select the exchange:",
-            reply_markup=reply_markup,
-            parse_mode=ParseMode.HTML
-        )
-        return
-    
-    elif data.startswith("exchange_"):
-        exchange = data.replace("exchange_", "")
-        context.user_data['selected_exchange'] = exchange
-        await query.edit_message_text(
-            f"➕ <b>Add New Stock - {exchange}</b>\n\n"
-            f"Now, send the stock name or trading symbol.\n\n"
-            f"<b>Examples:</b>\n"
-            f"• RELIANCE\n"
-            f"• TCS\n"
-            f"• TATAMOTORS\n"
-            f"• Infosys\n\n"
-            f"Or send /cancel to go back.",
-            parse_mode=ParseMode.HTML
-        )
-        return ADDING_STOCK
-    
-    elif data == "remove_stock":
-        symbols_with_names = controller.get_symbols_with_names()
-        if not symbols_with_names:
-            await query.edit_message_text(
-                "No stocks to remove.\n\nUse /menu to return."
-            )
+        if not is_authorized(user_id):
+            await query.answer("❌ Not authorized", show_alert=True)
             return ConversationHandler.END
         
-        keyboard = []
-        for stock in symbols_with_names:
-            button_text = f"❌ {stock['name']} ({stock['trading_symbol']})"
-            keyboard.append([InlineKeyboardButton(button_text, callback_data=f"rm_{stock['instrument_key']}")])
-        keyboard.append([InlineKeyboardButton("🔙 Cancel", callback_data="stocks_menu")])
+        await query.answer()
         
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            "➖ <b>Remove Stock</b>\n\nSelect a stock to remove:",
-            reply_markup=reply_markup,
-            parse_mode=ParseMode.HTML
-        )
-    
-    elif data.startswith("rm_"):
-        symbol = data[3:]
-        success, message = controller.remove_symbol(symbol)
+        data = query.data
         
-        if success:
+        if data == "start_bot":
+            success, message = controller.start_trading()
             await query.edit_message_text(
-                f"✅ {message}\n\nUse /menu to return to main menu."
+                f"{message}\n\nUse /menu to return to main menu."
             )
-        else:
+        
+        elif data == "stop_bot":
+            success, message = controller.stop_trading()
             await query.edit_message_text(
-                f"❌ {message}\n\nUse /menu to return to main menu."
+                f"{message}\n\nUse /menu to return to main menu."
             )
-    
-    elif data == "config":
-        env_vars = controller.read_env()
-        msg = "⚙️ <b>Current Configuration</b>\n\n"
         
-        config_items = {
-            'INTERVAL': 'Candle Interval',
-            'EMA_LENGTH': 'EMA Length',
-            'VOL_LENGTH': 'Volume Length',
-            'VOL_MULTIPLIER': 'Volume Multiplier',
-            'RISK_REWARD': 'Risk/Reward Ratio',
-            'VWAP_DISTANCE': 'VWAP Distance',
-            'SL_BUFFER': 'Stop Loss Buffer',
-            'TRADE_START_TIME': 'Trading Start',
-            'TRADE_END_TIME': 'Trading End'
-        }
+        elif data == "status":
+            status_msg = controller.get_status()
+            keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(status_msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
         
-        for key, label in config_items.items():
-            value = env_vars.get(key, 'Not set')
-            msg += f"• {label}: <code>{value}</code>\n"
-        
-        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-    
-    elif data == "help":
-        help_msg = (
-            "❓ <b>Help &amp; Commands</b>\n\n"
-            "<b>Main Features:</b>\n"
-            "• Start/Stop - Control the trading bot\n"
-            "• Status - View bot status and stocks\n"
-            "• Stocks - Add/remove stocks from watchlist\n"
-            "• Config - View trading parameters\n\n"
-            "<b>Commands:</b>\n"
-            "/start - Show main menu\n"
-            "/menu - Return to main menu\n"
-            "/status - Quick status check\n\n"
-            "<b>Adding Stocks:</b>\n"
-            "1. Select exchange (NSE or BSE)\n"
-            "2. Enter stock name or trading symbol\n"
-            "Examples: RELIANCE, TCS, TATAMOTORS\n\n"
-            "The bot will automatically find the correct ISIN code."
-        )
-        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(help_msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-    
-    elif data == "main_menu":
-        keyboard = [
-            [
-                InlineKeyboardButton("▶️ Start Bot", callback_data="start_bot"),
-                InlineKeyboardButton("⏹️ Stop Bot", callback_data="stop_bot")
-            ],
-            [
-                InlineKeyboardButton("📊 Status", callback_data="status"),
-                InlineKeyboardButton("📈 Stocks", callback_data="stocks_menu")
-            ],
-            [
-                InlineKeyboardButton("⚙️ Config", callback_data="config"),
-                InlineKeyboardButton("🔑 Token", callback_data="token_menu")
-            ],
-            [
-                InlineKeyboardButton("❓ Help", callback_data="help")
+        elif data == "stocks_menu":
+            symbols_with_names = controller.get_symbols_with_names()
+            msg = f"📈 <b>Stock Management</b>\n\n"
+            msg += f"Current stocks ({len(symbols_with_names)}):\n"
+            
+            if symbols_with_names:
+                for i, stock in enumerate(symbols_with_names, 1):
+                    msg += f"{i}. <b>{stock['name']}</b> (<code>{stock['trading_symbol']}</code>) - {stock['exchange']}\n"
+            else:
+                msg += "<i>No stocks configured</i>\n"
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("➕ Add Stock", callback_data="add_stock"),
+                    InlineKeyboardButton("➖ Remove Stock", callback_data="remove_stock")
+                ],
+                [InlineKeyboardButton("🔙 Back", callback_data="main_menu")]
             ]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(
-            "🤖 <b>Stock Trading Bot Controller</b>\n\nSelect an option:",
-            reply_markup=reply_markup,
-            parse_mode=ParseMode.HTML
-        )
-    
-    elif data == "token_menu":
-        token_manager = get_token_manager()
-        token_info = token_manager.get_token_info()
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
         
-        status_icon = "✅" if token_info['is_valid'] else "❌"
-        msg = f"🔑 <b>Upstox Token Status</b>\n\n"
-        msg += f"Status: {status_icon} {token_info['message']}\n"
-        msg += f"Last Checked: {token_info['checked_at']}\n\n"
+        elif data == "add_stock":
+            keyboard = [
+                [InlineKeyboardButton("NSE", callback_data="exchange_NSE_EQ")],
+                [InlineKeyboardButton("BSE", callback_data="exchange_BSE_EQ")],
+                [InlineKeyboardButton("🔙 Cancel", callback_data="stocks_menu")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                "➕ <b>Add New Stock</b>\n\n"
+                "First, select the exchange:",
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.HTML
+            )
+            return
         
-        if not token_info['is_valid']:
-            msg += "⚠️ <b>Token needs refresh!</b>\n"
-            msg += "Click 'Check Token' to verify or 'Refresh Token' to update.\n"
+        elif data.startswith("exchange_"):
+            exchange = data.replace("exchange_", "")
+            context.user_data['selected_exchange'] = exchange
+            await query.edit_message_text(
+                f"➕ <b>Add New Stock - {exchange}</b>\n\n"
+                f"Now, send the stock name or trading symbol.\n\n"
+                f"<b>Examples:</b>\n"
+                f"• RELIANCE\n"
+                f"• TCS\n"
+                f"• TATAMOTORS\n"
+                f"• Infosys\n\n"
+                f"Or send /cancel to go back.",
+                parse_mode=ParseMode.HTML
+            )
+            return ADDING_STOCK
         
-        keyboard = [
-            [
-                InlineKeyboardButton("🔄 Check Token", callback_data="check_token"),
-                InlineKeyboardButton("🔑 Refresh Token", callback_data="refresh_token")
-            ],
-            [InlineKeyboardButton("🔙 Back", callback_data="main_menu")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-    
-    elif data == "check_token":
-        token_manager = get_token_manager()
-        is_valid, message = token_manager.check_token_validity()
+        elif data == "remove_stock":
+            symbols_with_names = controller.get_symbols_with_names()
+            if not symbols_with_names:
+                await query.edit_message_text(
+                    "No stocks to remove.\n\nUse /menu to return."
+                )
+                return ConversationHandler.END
+            
+            keyboard = []
+            for stock in symbols_with_names:
+                button_text = f"❌ {stock['name']} ({stock['trading_symbol']})"
+                keyboard.append([InlineKeyboardButton(button_text, callback_data=f"rm_{stock['instrument_key']}")])
+            keyboard.append([InlineKeyboardButton("🔙 Cancel", callback_data="stocks_menu")])
+            
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                "➖ <b>Remove Stock</b>\n\nSelect a stock to remove:",
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.HTML
+            )
         
-        status_icon = "✅" if is_valid else "❌"
-        msg = f"🔑 <b>Token Check Result</b>\n\n"
-        msg += f"{status_icon} {message}\n\n"
-        msg += f"Checked at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        elif data.startswith("rm_"):
+            symbol = data[3:]
+            success, message = controller.remove_symbol(symbol)
+            
+            if success:
+                await query.edit_message_text(
+                    f"✅ {message}\n\nUse /menu to return to main menu."
+                )
+            else:
+                await query.edit_message_text(
+                    f"❌ {message}\n\nUse /menu to return to main menu."
+                )
         
-        keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="token_menu")]]
-        reply_markup = InlineKeyboardMarkup(keyboard)
-        await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-    
-    elif data == "refresh_token":
-        token_manager = get_token_manager()
-        auth_url = token_manager.get_authorization_url()
+        elif data == "config":
+            env_vars = controller.read_env()
+            msg = "⚙️ <b>Current Configuration</b>\n\n"
+            
+            config_items = {
+                'INTERVAL': 'Candle Interval',
+                'EMA_LENGTH': 'EMA Length',
+                'VOL_LENGTH': 'Volume Length',
+                'VOL_MULTIPLIER': 'Volume Multiplier',
+                'RISK_REWARD': 'Risk/Reward Ratio',
+                'VWAP_DISTANCE': 'VWAP Distance',
+                'SL_BUFFER': 'Stop Loss Buffer',
+                'TRADE_START_TIME': 'Trading Start',
+                'TRADE_END_TIME': 'Trading End'
+            }
+            
+            for key, label in config_items.items():
+                value = env_vars.get(key, 'Not set')
+                msg += f"• {label}: <code>{value}</code>\n"
+            
+            keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
         
-        if not auth_url:
-            msg = "❌ <b>Error</b>\n\nMissing Upstox credentials in .env file."
+        elif data == "help":
+            help_msg = (
+                "❓ <b>Help &amp; Commands</b>\n\n"
+                "<b>Main Features:</b>\n"
+                "• Start/Stop - Control the trading bot\n"
+                "• Status - View bot status and stocks\n"
+                "• Stocks - Add/remove stocks from watchlist\n"
+                "• Config - View trading parameters\n\n"
+                "<b>Commands:</b>\n"
+                "/start - Show main menu\n"
+                "/menu - Return to main menu\n"
+                "/status - Quick status check\n\n"
+                "<b>Adding Stocks:</b>\n"
+                "1. Select exchange (NSE or BSE)\n"
+                "2. Enter stock name or trading symbol\n"
+                "Examples: RELIANCE, TCS, TATAMOTORS\n\n"
+                "The bot will automatically find the correct ISIN code."
+            )
+            keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(help_msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+        
+        elif data == "main_menu":
+            keyboard = [
+                [
+                    InlineKeyboardButton("▶️ Start Bot", callback_data="start_bot"),
+                    InlineKeyboardButton("⏹️ Stop Bot", callback_data="stop_bot")
+                ],
+                [
+                    InlineKeyboardButton("📊 Status", callback_data="status"),
+                    InlineKeyboardButton("📈 Stocks", callback_data="stocks_menu")
+                ],
+                [
+                    InlineKeyboardButton("⚙️ Config", callback_data="config"),
+                    InlineKeyboardButton("🔑 Token", callback_data="token_menu")
+                ],
+                [
+                    InlineKeyboardButton("❓ Help", callback_data="help")
+                ]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(
+                "🤖 <b>Stock Trading Bot Controller</b>\n\nSelect an option:",
+                reply_markup=reply_markup,
+                parse_mode=ParseMode.HTML
+            )
+        
+        elif data == "token_menu":
+            token_manager = get_token_manager()
+            token_info = token_manager.get_token_info()
+            
+            status_icon = "✅" if token_info['is_valid'] else "❌"
+            msg = f"🔑 <b>Upstox Token Status</b>\n\n"
+            msg += f"Status: {status_icon} {token_info['message']}\n"
+            msg += f"Last Checked: {token_info['checked_at']}\n\n"
+            
+            if not token_info['is_valid']:
+                msg += "⚠️ <b>Token needs refresh!</b>\n"
+                msg += "Click 'Check Token' to verify or 'Refresh Token' to update.\n"
+            
+            keyboard = [
+                [
+                    InlineKeyboardButton("🔄 Check Token", callback_data="check_token"),
+                    InlineKeyboardButton("🔑 Refresh Token", callback_data="refresh_token")
+                ],
+                [InlineKeyboardButton("🔙 Back", callback_data="main_menu")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+        
+        elif data == "check_token":
+            token_manager = get_token_manager()
+            is_valid, message = token_manager.check_token_validity()
+            
+            status_icon = "✅" if is_valid else "❌"
+            msg = f"🔑 <b>Token Check Result</b>\n\n"
+            msg += f"{status_icon} {message}\n\n"
+            msg += f"Checked at: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            
             keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="token_menu")]]
             reply_markup = InlineKeyboardMarkup(keyboard)
             await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-            return
         
-        # Create clickable button with the auth URL
-        keyboard = [
-            [InlineKeyboardButton("🔐 Login to Upstox", url=auth_url)],
-            [InlineKeyboardButton("✅ I've Authorized", callback_data="auth_complete")],
-            [InlineKeyboardButton("🔙 Cancel", callback_data="token_menu")]
-        ]
-        reply_markup = InlineKeyboardMarkup(keyboard)
+        elif data == "refresh_token":
+            token_manager = get_token_manager()
+            auth_url = token_manager.get_authorization_url()
+            
+            if not auth_url:
+                msg = "❌ <b>Error</b>\n\nMissing Upstox credentials in .env file."
+                keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="token_menu")]]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+                return
+            
+            # Create clickable button with the auth URL
+            keyboard = [
+                [InlineKeyboardButton("🔐 Login to Upstox", url=auth_url)],
+                [InlineKeyboardButton("✅ I've Authorized", callback_data="auth_complete")],
+                [InlineKeyboardButton("🔙 Cancel", callback_data="token_menu")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            
+            msg = (
+                "🔑 <b>Token Refresh Process</b>\n\n"
+                "<b>Step 1:</b> Click the 'Login to Upstox' button below\n"
+                "<b>Step 2:</b> Enter OTP and authorize the app\n"
+                "<b>Step 3:</b> Copy the authorization code from the redirect URL\n"
+                "<b>Step 4:</b> Click 'I've Authorized' and paste the code\n\n"
+                "The redirect URL will look like:\n"
+                "<code>http://your-redirect-uri/?code=XXXXX</code>\n\n"
+                "Copy only the code part (after <code>code=</code>)"
+            )
+            
+            await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
         
-        msg = (
-            "🔑 <b>Token Refresh Process</b>\n\n"
-            "<b>Step 1:</b> Click the 'Login to Upstox' button below\n"
-            "<b>Step 2:</b> Enter OTP and authorize the app\n"
-            "<b>Step 3:</b> Copy the authorization code from the redirect URL\n"
-            "<b>Step 4:</b> Click 'I've Authorized' and paste the code\n\n"
-            "The redirect URL will look like:\n"
-            "<code>http://your-redirect-uri/?code=XXXXX</code>\n\n"
-            "Copy only the code part (after <code>code=</code>)"
-        )
-        
-        await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-    
-    elif data == "auth_complete":
-        msg = (
-            "📝 <b>Enter Authorization Code</b>\n\n"
-            "Please send the authorization code you received from the redirect URL.\n\n"
-            "Example: If the URL is:\n"
-            "<code>http://localhost/?code=abc123xyz</code>\n\n"
-            "Send: <code>abc123xyz</code>\n\n"
-            "Or send /cancel to abort."
-        )
-        await query.edit_message_text(msg, parse_mode=ParseMode.HTML)
-        return WAITING_AUTH_CODE
+        elif data == "auth_complete":
+            msg = (
+                "📝 <b>Enter Authorization Code</b>\n\n"
+                "Please send the authorization code you received from the redirect URL.\n\n"
+                "Example: If the URL is:\n"
+                "<code>http://localhost/?code=abc123xyz</code>\n\n"
+                "Send: <code>abc123xyz</code>\n\n"
+                "Or send /cancel to abort."
+            )
+            await query.edit_message_text(msg, parse_mode=ParseMode.HTML)
+            return WAITING_AUTH_CODE
+    except Exception as e:
+        logger.exception("Error in button_handler")
+
+        try:
+            if update.callback_query:
+                await update.callback_query.answer(
+                    "⚠️ Something went wrong. Please try again.",
+                    show_alert=True
+                )
+        except Exception:
+            pass
 
 async def add_stock_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Handle adding a new stock"""
@@ -578,6 +616,8 @@ async def add_stock_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     # Clear user data
     context.user_data.clear()
+
+    
     
     return ConversationHandler.END
 
@@ -911,7 +951,8 @@ def main():
         await send_startup_message(application)
     
     app.post_init = post_init
-    
+    app.add_error_handler(error_handler)
+
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
