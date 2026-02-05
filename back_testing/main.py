@@ -54,11 +54,6 @@ For more information, visit: https://github.com/saikesav-sai/stock_advanced_bot
 
     args = parser.parse_args()
 
-    # Print banner
-    print("=" * 80)
-    print("  STOCK ADVANCED BOT - BACKTESTING FRAMEWORK")
-    print("=" * 80)
-    print()
 
     # Check if config file exists
     if not os.path.exists(args.config):
@@ -75,12 +70,9 @@ For more information, visit: https://github.com/saikesav-sai/stock_advanced_bot
         runner = BacktestRunner(args.config)
 
         # Run backtest
-        print("\nStarting backtest...")
-        print("-" * 80)
 
         results = runner.run()
 
-        print("-" * 80)
         print(f"\nBacktest completed!")
         print(f"Total trades: {len(results['trades'])}")
         print(f"Final equity: ₹{results['final_equity']:,.2f}")

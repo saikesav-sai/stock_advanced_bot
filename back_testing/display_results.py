@@ -574,7 +574,7 @@ class ReportGenerator:
                 <td>{trade.exit_time.strftime('%Y-%m-%d %H:%M') if trade.exit_time else '-'}</td>
                 <td>{trade.side}</td>
                 <td>{trade.entry_price:.2f}</td>
-                <td>{trade.exit_price:.2f if trade.exit_price else '-'}</td>
+                <td>{f"{trade.exit_price:.2f}" if trade.exit_price else '-'}</td>
                 <td>{trade.quantity:.0f}</td>
                 <td class="{pnl_class}">{trade.net_pnl:.2f}</td>
                 <td class="{pnl_class}">{trade.pnl_pct:.2f}%</td>

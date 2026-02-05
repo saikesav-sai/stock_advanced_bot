@@ -19,13 +19,13 @@ IST = pytz.timezone('Asia/Kolkata')
 
 
 class UpstoxHistoricalFetcher:
-    def __init__(self, access_token=None):
+    def __init__(self, access_token=None, root_db_path="market_data.db"):
         self.access_token = access_token or os.getenv("UPSTOX_ACCESS_TOKEN")
         self.base_url = "https://api.upstox.com/v3/historical-candle"
         
         # Get absolute path to root folder's market_data.db
         root_folder = os.path.abspath(os.path.join(os.path.dirname(__file__), '..'))
-        db_path = os.path.join(root_folder, 'market_data.db')
+        db_path = os.path.join(root_folder, root_db_path)
         self.db = CandleDB(db_path=db_path)
 
     def fetch_last_n_working_days(self,days):
@@ -47,7 +47,7 @@ class UpstoxHistoricalFetcher:
         working_days.reverse()  # Earliest date first
         return working_days
     
-    def fetch_and_store_candles(self, instrument_key: str, days: int = 2):
+    def fetch_and_store_candles(self, instrument_key: str, days: int =None,start_date: str = None, end_date: str = None):
         """
         Fetch last N days of 1-minute candles and store in database
         
@@ -55,11 +55,29 @@ class UpstoxHistoricalFetcher:
             instrument_key: e.g., "NSE_EQ|INE467B01029" for TCS
             days: Number of days to fetch (default 2)
         """
-        today = datetime.now().date()
-        
-        all_candles = []
-        
-        working_dates = self.fetch_last_n_working_days(days)
+        if days is not None:
+            today = datetime.now().date()
+            
+            all_candles = []
+            
+            working_dates = self.fetch_last_n_working_days(days)
+        else:
+            if start_date is None or end_date is None:
+                logger.error("Either days or both start_date and end_date must be provided")
+                return []
+            
+            start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
+            end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
+            
+            # Generate list of working dates between start_date and end_date
+            working_dates = []
+            current_date = start_dt
+            while current_date <= end_dt:
+                if current_date.weekday() < 5:  # Monday to Friday
+                    working_dates.append(current_date)
+                current_date += timedelta(days=1)
+            
+            all_candles = []
         
         for target_date in working_dates:
             
@@ -74,14 +92,15 @@ class UpstoxHistoricalFetcher:
             else:
                 logger.warning(f"✗ No candles found for {target_date}")
         
-        logger.info("Fetching todays candles...")
-        candles_today = self._fetch_today(instrument_key)
-        candles_today.reverse()
-        if candles_today:
-            all_candles.extend(candles_today)
-            logger.info(f"✓ Fetched {len(candles_today)} candles for today ({today})")
-        else:
-            logger.warning(f"✗ No candles found for today ({today})")
+        if days is not None:
+            logger.info("Fetching todays candles...")
+            candles_today = self._fetch_today(instrument_key)
+            candles_today.reverse()
+            if candles_today:
+                all_candles.extend(candles_today)
+                logger.info(f"✓ Fetched {len(candles_today)} candles for today ({today})")
+            else:
+                logger.warning(f"✗ No candles found for today ({today})")
         
 
         # Store in database

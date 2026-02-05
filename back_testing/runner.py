@@ -11,7 +11,7 @@ import pandas as pd
 # Add parent directory to path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
-from back_testing.loadin_data import BacktestDataLoader
+from back_testing.loading_data import BacktestDataLoader
 from core_logic.logger_config import get_logger
 
 logger = get_logger()

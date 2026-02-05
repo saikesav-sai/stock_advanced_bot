@@ -2,6 +2,7 @@
 *.db
 *.log
 **/__pycache__/
+**/reports/
 /venv
 /stock_advanced_bot_env
 /logs
