@@ -1,0 +1,37 @@
+{
+  "backtest_config": {
+    "name": "Strategy1_Backtest",
+    "description": "PDH/PDL Breakout Strategy Validation",
+
+    "data": {
+      "symbols": ["INE467B01029"],
+      "start_date": "2024-01-01",
+      "end_date": "2024-01-31",
+      "interval": "5",
+      "database_path": "back_testing_market_data.db",
+      "auto_fetch": true,
+      "instrument_keys": {
+        "INE467B01029": "NSE_EQ|INE467B01029"
+      }
+    },
+
+    "strategy": {
+      "module": "core_logic.strategies",
+      "class": "Strategy1",
+      "parameters": {}
+    },
+
+    "execution": {
+      "initial_capital": 100000,
+      "position_size": 10000,
+      "commission_pct": 0.05,
+      "slippage_pct": 0.05
+    },
+
+    "output": {
+      "report_dir": "back_testing/reports",
+      "auto_open_browser": true,
+      "save_trade_log": true
+    }
+  }
+}

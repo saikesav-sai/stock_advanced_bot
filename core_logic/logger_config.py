@@ -2,7 +2,7 @@
 Logger Configuration Module
 Centralized logging setup for the stock trading bot
 """
-import glob,loggin,os,time
+import glob,logging,os,time
 from logging.handlers import TimedRotatingFileHandler
 
 

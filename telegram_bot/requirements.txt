@@ -7,7 +7,7 @@ numpy>=1.24.0
 python-dotenv>=1.0.0
 requests>=2.31.0
 pytz>=2023.3
-
+plotyn>=5.14.0
 # Upstox API
 upstox-python-sdk>=1.0.0
 
