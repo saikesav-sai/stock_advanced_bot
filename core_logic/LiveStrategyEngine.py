@@ -1,15 +1,14 @@
-import os
-import sys
+import os,sys,pytz
 from datetime import datetime, timedelta
-
 import numpy as np
 import pandas as pd
-import pytz
 
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+from core_logic.strategies import Strategy1 as strategy
 from core_logic.logger_config import get_logger
 from database_logic.candle_db import CandleDB
 from database_logic.fetch_historical_candles import UpstoxHistoricalFetcher
+
+sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 logger = get_logger()
 
@@ -28,28 +27,12 @@ class LiveStrategyEngine:
         self.df = pd.DataFrame(columns=["timestamp","open","high","low","close","volume"])
         self.current_minute = None
         self.minute=None
-        # State
-        self.long_taken_today = False
-        self.short_taken_today = False
-        self.active_position = None
-        self.pdh = None
-        self.pdl = None
-        self.today_date = None
+
+        self.strategy = strategy()
         
         # Load historical data from DB
         if self.symbol:
             self._load_historical_data()
-
-        # Strategy parameters
-        self.EMA_LEN = 50
-        self.VOL_LEN = 20 # set to 20
-        self.VOL_MULT = 0.5  # Relaxed from 1.5 - only need 20% volume increase
-        self.RR = 1.2  # Relaxed from 1.6 - more achievable targets
-        self.VWAP_DIST = 0.01  # Relaxed from 0.15 - allow trades closer to VWAP
-        self.SL_BUFFER = 0.08
-
-        self.trade_start = 915 #changed startup time 915 -> 930 
-        self.trade_end = 1525
 
     def _load_historical_data(self):
         """Load historical candles from database, fetch if not found"""
@@ -81,11 +64,12 @@ class LiveStrategyEngine:
             
             self.df = df
             logger.info(f"[{self.symbol}] Loaded {len(self.df)} historical candles from database")
-            
-            # Calculate PDH/PDL from yesterday's data
-            self.pdh, self.pdl = self.db.get_previous_day_high_low(self.symbol, today)
-            if self.pdh and self.pdl:
-                logger.info(f"[{self.symbol}] PDH: {self.pdh}, PDL: {self.pdl}")
+
+            # Calculate PDH/PDL from yesterday's data and set in strategy
+            pdh, pdl = self.db.get_previous_day_high_low(self.symbol, today)
+            if pdh and pdl:
+                self.strategy.set_pdh_pdl(pdh, pdl)
+                logger.info(f"[{self.symbol}] PDH: {pdh}, PDL: {pdl}")
         else:
             logger.info(f"[{self.symbol}] No historical data available")
     
@@ -151,138 +135,7 @@ class LiveStrategyEngine:
 
         return self.process_strategy()
 
-    
+
     def process_strategy(self):
-        MIN_CANDLES = self.EMA_LEN  + 10 
-        if len(self.df) < MIN_CANDLES:
-            logger.info(f"[{self.symbol}] Not enough data for strategy processing ({len(self.df)}/{MIN_CANDLES} candles)")
-            return None
-
-        df = self.df.copy()
-        
-        # Date change reset
-        cur_date = df.iloc[-1]["timestamp"].date()
-        if self.today_date != cur_date:
-            self.today_date = cur_date
-            self.long_taken_today = False
-            self.short_taken_today = False
-
-            # Compute PDH/PDL from yesterday
-            prev = df[df["timestamp"].dt.date != cur_date]
-            if len(prev) > 0:
-                self.pdh = prev["high"].max()
-                self.pdl = prev["low"].min()
-        # Indicators
-
-        df["EMA"] = df["close"].ewm(span=self.EMA_LEN).mean()
-        df["VWAP"] = (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
-        df["VolMA"] = df["volume"].rolling(self.VOL_LEN).mean()
-
-        row = df.iloc[-1]
-        prev = df.iloc[-2]
-
-        curTime = row.timestamp.hour * 100 + row.timestamp.minute
-        can_trade = (self.trade_start <= curTime <= self.trade_end)
-
-
-        # Volume OK - handle NaN VolMA
-        if pd.isna(row.VolMA):
-            vol_ok = False
-        else:
-            vol_ok = row.volume > row.VolMA * self.VOL_MULT
-        # VWAP distance
-        dist_pct = abs(row.close - row.VWAP) / row.VWAP * 100
-        vwap_ok = dist_pct >= self.VWAP_DIST
-
-        # Trend
-        uptrend = row.close > row.EMA
-        downtrend = row.close < row.EMA
-
-        # Breakouts
-        long_break = self.pdh is not None and row.high > self.pdh  # Simplified
-        short_break = self.pdl is not None and row.low < self.pdl  # Simplified
-            
-
-        # ===============================
-        # HANDLE OPEN POSITION
-        # ===============================
-        if self.active_position:
-            pos = self.active_position
-            entry_price = pos["entry"]
-            sl = pos["sl"]
-            tp = pos["tp"]
-
-            if pos["side"] == "LONG":
-                if row.low <= sl:
-                    self.active_position = None
-                    return {"signal":"EXIT","reason":"SL HIT","exit_price":sl}
-
-                if row.high >= tp:
-                    self.active_position = None
-                    return {"signal":"EXIT","reason":"TP HIT","exit_price":tp}
-
-            if pos["side"] == "SHORT":
-                if row.high >= sl:
-                    self.active_position = None
-                    return {"signal":"EXIT","reason":"SL HIT","exit_price":sl}
-
-                if row.low <= tp:
-                    self.active_position = None
-                    return {"signal":"EXIT","reason":"TP HIT","exit_price":tp}
-
-            return None
-
-        # ===============================
-        # ENTRY: LONG
-        # ===============================
-        # Only enter if we don't already have an active position
-        if (
-            can_trade and
-            not self.active_position and  # No active trade
-            vol_ok and
-            vwap_ok and
-            uptrend and
-            long_break
-        ):
-            sl_vwap = row.VWAP * (1 - self.SL_BUFFER/100)
-            sl = min(sl_vwap, row.low)
-
-            if sl < row.close:
-                risk = row.close - sl
-                tp = row.close + risk * self.RR
-
-                self.active_position = {
-                    "side": "LONG",
-                    "entry": row.close,
-                    "sl": sl,
-                    "tp": tp
-                }
-                return {"signal":"BUY", "entry_price":row.close, "sl":sl, "tp":tp}
-
-        # ===============================
-        # ENTRY: SHORT
-        # ===============================
-        # Only enter if we don't already have an active position
-        if (
-            can_trade and
-            not self.active_position and  # No active trade
-            vol_ok and
-            vwap_ok and
-            downtrend and
-            short_break
-        ):
-            sl_vwap = row.VWAP * (1 + self.SL_BUFFER/100)
-            sl = max(sl_vwap, row.high)
-
-            if sl > row.close:
-                risk = sl - row.close
-                tp = row.close - risk * self.RR
-
-                self.active_position = {
-                    "side":"SHORT",
-                    "entry":row.close,
-                    "sl":sl,
-                    "tp":tp
-                }
-                return {"signal":"SELL", "entry_price":row.close, "sl":sl, "tp":tp}
-        return None
+        """Process strategy using strategy class"""
+        return self.strategy.process(self.df, symbol=self.symbol)

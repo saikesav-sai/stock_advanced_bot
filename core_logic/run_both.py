@@ -1,10 +1,7 @@
 """
 Launcher script to run both main.py and telegram_bot.py concurrently
 """
-import os
-import sys
-import threading
-import time
+import os,sys,threading,time
 from datetime import datetime
 
 
