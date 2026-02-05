@@ -286,6 +286,9 @@ class BacktestRunner:
         self.trades: List[Trade] = []
         self.equity_curve: List[Dict] = []
 
+        # Per-stock results tracking
+        self.stock_results: Dict[str, Dict] = {}
+
         logger.info(f"Initialized BacktestRunner: {self.config['name']}")
 
     def _load_config(self, config_path: str) -> Dict:
@@ -332,17 +335,52 @@ class BacktestRunner:
         # Get symbols to test
         symbols = self.config['data']['symbols']
 
-        for symbol in symbols:
-            logger.info(f"\nBacktesting symbol: {symbol}")
+        # Store initial capital for reset
+        initial_capital = self.portfolio.initial_capital
+
+        for symbol_idx, symbol in enumerate(symbols):
+            logger.info(f"\n{'='*60}")
+            logger.info(f"Backtesting symbol {symbol_idx + 1}/{len(symbols)}: {symbol}")
+            logger.info(f"{'='*60}")
+
+            # Reset portfolio for each stock (fresh capital)
+            self.portfolio.cash = initial_capital
+            self.portfolio.equity = initial_capital
+            self.portfolio.position = None
+
+            # Track starting point for this stock
+            stock_start_idx = len(self.trades)
+            equity_start_idx = len(self.equity_curve)
+
+            # Run simulation for this symbol
             self._simulate_single_symbol(symbol)
+
+            # Calculate per-stock results
+            stock_trades = self.trades[stock_start_idx:]
+            stock_equity_curve = self.equity_curve[equity_start_idx:]
+
+            # Store stock-specific results
+            self.stock_results[symbol] = {
+                'trades': stock_trades,
+                'equity_curve': stock_equity_curve,
+                'total_trades': len(stock_trades),
+                'final_equity': self.portfolio.equity,
+                'net_profit': self.portfolio.equity - initial_capital,
+                'return_pct': ((self.portfolio.equity - initial_capital) / initial_capital) * 100
+            }
+
+            logger.info(f"\n{symbol} Summary:")
+            logger.info(f"  Trades: {len(stock_trades)}")
+            logger.info(f"  Final Equity: ₹{self.portfolio.equity:,.2f}")
+            logger.info(f"  Net P&L: ₹{self.portfolio.equity - initial_capital:,.2f}")
+            logger.info(f"  Return: {((self.portfolio.equity - initial_capital) / initial_capital) * 100:.2f}%")
 
         end_time = datetime.now()
         duration = (end_time - start_time).total_seconds()
 
-        logger.info("=" * 80)
+        logger.info("\n" + "=" * 80)
         logger.info(f"BACKTEST COMPLETED in {duration:.2f} seconds")
-        logger.info(f"Total trades: {len(self.trades)}")
-        logger.info(f"Final equity: {self.portfolio.equity:.2f}")
+        logger.info(f"Total trades across all stocks: {len(self.trades)}")
         logger.info("=" * 80)
 
         # Return results
@@ -350,8 +388,9 @@ class BacktestRunner:
             'config': self.config,
             'trades': self.trades,
             'equity_curve': self.equity_curve,
-            'initial_capital': self.portfolio.initial_capital,
-            'final_equity': self.portfolio.equity
+            'initial_capital': initial_capital,
+            'final_equity': self.portfolio.equity,
+            'stock_results': self.stock_results
         }
 
     def _simulate_single_symbol(self, symbol: str):

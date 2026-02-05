@@ -73,9 +73,26 @@ For more information, visit: https://github.com/saikesav-sai/stock_advanced_bot
 
         results = runner.run()
 
-        print(f"\nBacktest completed!")
-        print(f"Total trades: {len(results['trades'])}")
-        print(f"Final equity: ₹{results['final_equity']:,.2f}")
+        # Display per-stock summary
+        print("\n" + "=" * 80)
+        print("PER-STOCK RESULTS")
+        print("=" * 80)
+
+        stock_results = results.get('stock_results', {})
+        if stock_results:
+            print(f"\n{'Symbol':<15} {'Trades':<10} {'Return %':<12} {'Net P&L':<15} {'Final Equity':<15}")
+            print("-" * 80)
+            for symbol, stock_data in stock_results.items():
+                print(f"{symbol:<15} {stock_data['total_trades']:<10} "
+                      f"{stock_data['return_pct']:>10.2f}% "
+                      f"₹{stock_data['net_profit']:>12,.2f} "
+                      f"₹{stock_data['final_equity']:>12,.2f}")
+
+        print("\n" + "=" * 80)
+        print(f"OVERALL SUMMARY")
+        print("=" * 80)
+        print(f"Total trades across all stocks: {len(results['trades'])}")
+        print(f"Number of stocks tested: {len(stock_results)}")
 
         # Generate report
         print("\nGenerating report...")
@@ -83,7 +100,8 @@ For more information, visit: https://github.com/saikesav-sai/stock_advanced_bot
         backtest_results = BacktestResults(
             trades=results['trades'],
             equity_curve=results['equity_curve'],
-            config=results['config']
+            config=results['config'],
+            stock_results=results.get('stock_results', {})
         )
 
         report_gen = ReportGenerator(backtest_results)

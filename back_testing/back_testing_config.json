@@ -4,14 +4,17 @@
     "description": "PDH/PDL Breakout Strategy Validation",
 
     "data": {
-      "symbols": ["INE467B01029"],
+      "symbols": ["INE053F01010","INE733E01010","INE848E01016","INE859A01011"],
       "start_date": "2024-01-01",
       "end_date": "2024-01-31",
       "interval": "5",
       "database_path": "back_testing_market_data.db",
       "auto_fetch": true,
       "instrument_keys": {
-        "INE467B01029": "NSE_EQ|INE467B01029"
+        "INE053F01010": "NSE_EQ|INE053F01010",
+        "INE733E01010": "NSE_EQ|INE733E01010",
+        "INE848E01016": "NSE_EQ|INE848E01016",
+        "INE859A01011": "NSE_EQ|INE859A01011"
       }
     },
 

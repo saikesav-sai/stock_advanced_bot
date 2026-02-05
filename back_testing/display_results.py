@@ -20,7 +20,7 @@ logger = get_logger()
 class BacktestResults:
     """Container for backtest results with analysis methods"""
 
-    def __init__(self, trades: List, equity_curve: List[Dict], config: Dict):
+    def __init__(self, trades: List, equity_curve: List[Dict], config: Dict, stock_results: Dict = None):
         """
         Initialize backtest results
 
@@ -28,14 +28,19 @@ class BacktestResults:
             trades: List of Trade objects
             equity_curve: List of equity snapshots
             config: Backtest configuration
+            stock_results: Dict of per-stock results
         """
         self.trades = trades
         self.equity_curve = pd.DataFrame(equity_curve)
         self.config = config
         self.initial_capital = config['execution']['initial_capital']
+        self.stock_results = stock_results or {}
 
         # Calculate metrics
         self.metrics = self._calculate_metrics()
+
+        # Calculate per-stock metrics
+        self.stock_metrics = self._calculate_stock_metrics()
 
     def _calculate_metrics(self) -> Dict:
         """Calculate comprehensive performance metrics"""
@@ -272,6 +277,74 @@ class BacktestResults:
 
         return max_wins, max_losses
 
+    def _calculate_stock_metrics(self) -> Dict[str, Dict]:
+        """Calculate metrics for each individual stock"""
+        stock_metrics = {}
+
+        for symbol, stock_data in self.stock_results.items():
+            stock_trades = stock_data['trades']
+
+            if len(stock_trades) == 0:
+                stock_metrics[symbol] = {
+                    'total_trades': 0,
+                    'win_rate': 0,
+                    'net_profit': 0,
+                    'return_pct': 0,
+                    'profit_factor': 0,
+                    'avg_win': 0,
+                    'avg_loss': 0,
+                    'max_drawdown': 0
+                }
+                continue
+
+            # Convert to DataFrame
+            trades_df = pd.DataFrame([t.to_dict() for t in stock_trades])
+
+            # Basic stats
+            total_trades = len(trades_df)
+            winning_trades = len(trades_df[trades_df['net_pnl'] > 0])
+            losing_trades = len(trades_df[trades_df['net_pnl'] < 0])
+            win_rate = (winning_trades / total_trades * 100) if total_trades > 0 else 0
+
+            # P&L
+            gross_profit = trades_df[trades_df['net_pnl'] > 0]['net_pnl'].sum() if winning_trades > 0 else 0
+            gross_loss = abs(trades_df[trades_df['net_pnl'] < 0]['net_pnl'].sum()) if losing_trades > 0 else 0
+            net_profit = trades_df['net_pnl'].sum()
+            profit_factor = (gross_profit / gross_loss) if gross_loss > 0 else float('inf')
+
+            avg_win = gross_profit / winning_trades if winning_trades > 0 else 0
+            avg_loss = gross_loss / losing_trades if losing_trades > 0 else 0
+
+            # Returns
+            return_pct = stock_data['return_pct']
+
+            # Drawdown for this stock
+            if len(stock_data['equity_curve']) > 0:
+                equity_df = pd.DataFrame(stock_data['equity_curve'])
+                equity = equity_df['equity']
+                running_max = equity.expanding().max()
+                drawdown = (equity - running_max) / running_max * 100
+                max_dd = drawdown.min()
+            else:
+                max_dd = 0
+
+            stock_metrics[symbol] = {
+                'total_trades': total_trades,
+                'winning_trades': winning_trades,
+                'losing_trades': losing_trades,
+                'win_rate': round(win_rate, 2),
+                'net_profit': round(net_profit, 2),
+                'return_pct': round(return_pct, 2),
+                'profit_factor': round(profit_factor, 2) if profit_factor != float('inf') else float('inf'),
+                'avg_win': round(avg_win, 2),
+                'avg_loss': round(avg_loss, 2),
+                'max_drawdown': round(max_dd, 2),
+                'gross_profit': round(gross_profit, 2),
+                'gross_loss': round(gross_loss, 2)
+            }
+
+        return stock_metrics
+
 
 class ReportGenerator:
     """Generates HTML report with interactive charts"""
@@ -308,13 +381,16 @@ class ReportGenerator:
         monthly_returns_chart = self._create_monthly_returns_chart()
         hourly_dist_chart = self._create_hourly_distribution_chart()
 
-        # Generate trade table
+        # Generate tables
         trade_table_html = self._create_trade_analysis_table()
+        stock_summary_table = self._create_stock_summary_table()
+        stock_comparison_chart = self._create_stock_comparison_chart()
 
         # Build HTML
         html = self._build_html(
             equity_chart, drawdown_chart, pnl_dist_chart,
-            monthly_returns_chart, hourly_dist_chart, trade_table_html
+            monthly_returns_chart, hourly_dist_chart, trade_table_html,
+            stock_summary_table, stock_comparison_chart
         )
 
         # Write to file
@@ -334,14 +410,24 @@ class ReportGenerator:
 
         fig = go.Figure()
 
-        # Equity line
-        fig.add_trace(go.Scatter(
-            x=df['timestamp'],
-            y=df['equity'],
-            mode='lines',
-            name='Equity',
-            line=dict(color='#2E86AB', width=2)
-        ))
+        # Color palette for different stocks
+        colors = ['#2E86AB', '#A23B72', '#F18F01', '#06A77D', '#D90368', '#00BBF9', '#F77F00', '#8338EC']
+        
+        # Add equity line for each stock
+        stock_symbols = list(self.results.stock_results.keys())
+        for idx, symbol in enumerate(stock_symbols):
+            stock_data = self.results.stock_results[symbol]
+            stock_equity_curve = pd.DataFrame(stock_data['equity_curve'])
+            
+            if len(stock_equity_curve) > 0:
+                color = colors[idx % len(colors)]
+                fig.add_trace(go.Scatter(
+                    x=stock_equity_curve['timestamp'],
+                    y=stock_equity_curve['equity'],
+                    mode='lines',
+                    name=symbol,
+                    line=dict(color=color, width=2)
+                ))
 
         # Initial capital line
         fig.add_trace(go.Scatter(
@@ -352,34 +438,41 @@ class ReportGenerator:
             line=dict(color='gray', width=1, dash='dash')
         ))
 
-        # Mark trades on equity curve
+        # Mark trades on equity curve with stock-specific colors
         if len(self.results.trades) > 0:
-            trade_times = [t.exit_time for t in self.results.trades if t.exit_time]
-            trade_equities = []
-            trade_colors = []
-            trade_sizes = []
-
-            for trade in self.results.trades:
-                if trade.exit_time:
-                    # Find equity at trade exit time
-                    equity_at_exit = df[df['timestamp'] <= trade.exit_time]['equity'].iloc[-1] if len(df[df['timestamp'] <= trade.exit_time]) > 0 else self.results.initial_capital
-                    trade_equities.append(equity_at_exit)
-                    trade_colors.append('green' if trade.net_pnl > 0 else 'red')
-                    trade_sizes.append(10)
-
-            fig.add_trace(go.Scatter(
-                x=trade_times,
-                y=trade_equities,
-                mode='markers',
-                name='Trades',
-                marker=dict(
-                    color=trade_colors,
-                    size=trade_sizes,
-                    symbol='circle',
-                    line=dict(width=1, color='white')
-                ),
-                hovertemplate='%{x}<br>Equity: %{y:.2f}<extra></extra>'
-            ))
+            for idx, symbol in enumerate(stock_symbols):
+                stock_data = self.results.stock_results[symbol]
+                stock_trades = stock_data['trades']
+                stock_equity_curve = pd.DataFrame(stock_data['equity_curve'])
+                
+                if len(stock_trades) > 0 and len(stock_equity_curve) > 0:
+                    trade_times = []
+                    trade_equities = []
+                    trade_colors = []
+                    
+                    for trade in stock_trades:
+                        if trade.exit_time:
+                            # Find equity at trade exit time
+                            equity_at_exit = stock_equity_curve[stock_equity_curve['timestamp'] <= trade.exit_time]['equity'].iloc[-1] if len(stock_equity_curve[stock_equity_curve['timestamp'] <= trade.exit_time]) > 0 else self.results.initial_capital
+                            trade_times.append(trade.exit_time)
+                            trade_equities.append(equity_at_exit)
+                            trade_colors.append('green' if trade.net_pnl > 0 else 'red')
+                    
+                    if trade_times:
+                        fig.add_trace(go.Scatter(
+                            x=trade_times,
+                            y=trade_equities,
+                            mode='markers',
+                            name=f'{symbol} Trades',
+                            marker=dict(
+                                color=trade_colors,
+                                size=8,
+                                symbol='circle',
+                                line=dict(width=1, color='white')
+                            ),
+                            hovertemplate='%{x}<br>Equity: %{y:.2f}<extra></extra>',
+                            showlegend=False
+                        ))
 
         fig.update_layout(
             title='Equity Curve',
@@ -399,20 +492,35 @@ class ReportGenerator:
         if len(df) == 0:
             return ""
 
-        equity = df['equity']
-        running_max = equity.expanding().max()
-        drawdown = (equity - running_max) / running_max * 100
-
         fig = go.Figure()
-
-        fig.add_trace(go.Scatter(
-            x=df['timestamp'],
-            y=drawdown,
-            fill='tozeroy',
-            name='Drawdown',
-            line=dict(color='#A23B72', width=2),
-            fillcolor='rgba(162, 59, 114, 0.3)'
-        ))
+        
+        # Color palette for different stocks
+        colors = ['#2E86AB', '#A23B72', '#F18F01', '#06A77D', '#D90368', '#00BBF9', '#F77F00', '#8338EC']
+        
+        # Add drawdown line for each stock
+        stock_symbols = list(self.results.stock_results.keys())
+        for idx, symbol in enumerate(stock_symbols):
+            stock_data = self.results.stock_results[symbol]
+            stock_equity_curve = pd.DataFrame(stock_data['equity_curve'])
+            
+            if len(stock_equity_curve) > 0:
+                equity = stock_equity_curve['equity']
+                running_max = equity.expanding().max()
+                drawdown = (equity - running_max) / running_max * 100
+                
+                color = colors[idx % len(colors)]
+                # Convert hex color to rgba for fill
+                rgb = tuple(int(color.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
+                fillcolor = f'rgba({rgb[0]}, {rgb[1]}, {rgb[2]}, 0.3)'
+                
+                fig.add_trace(go.Scatter(
+                    x=stock_equity_curve['timestamp'],
+                    y=drawdown,
+                    fill='tozeroy',
+                    name=symbol,
+                    line=dict(color=color, width=2),
+                    fillcolor=fillcolor
+                ))
 
         fig.update_layout(
             title='Drawdown (%)',
@@ -608,8 +716,92 @@ class ReportGenerator:
 
         return table_html
 
+    def _create_stock_summary_table(self) -> str:
+        """Generate HTML table summarizing each stock's performance"""
+        if not self.results.stock_metrics:
+            return "<p>No per-stock data available</p>"
+
+        rows = ""
+        for symbol, metrics in self.results.stock_metrics.items():
+            return_class = "positive" if metrics['return_pct'] > 0 else "negative"
+            rows += f"""
+            <tr>
+                <td><strong>{symbol}</strong></td>
+                <td>{metrics['total_trades']}</td>
+                <td>{metrics['winning_trades']}</td>
+                <td>{metrics['losing_trades']}</td>
+                <td>{metrics['win_rate']:.2f}%</td>
+                <td class="{return_class}">₹{metrics['net_profit']:,.2f}</td>
+                <td class="{return_class}">{metrics['return_pct']:.2f}%</td>
+                <td>{metrics['profit_factor']:.2f}</td>
+                <td>₹{metrics['avg_win']:,.2f}</td>
+                <td>₹{metrics['avg_loss']:,.2f}</td>
+                <td class="negative">{metrics['max_drawdown']:.2f}%</td>
+            </tr>
+            """
+
+        table_html = f"""
+        <table>
+            <thead>
+                <tr>
+                    <th>Symbol</th>
+                    <th>Total Trades</th>
+                    <th>Wins</th>
+                    <th>Losses</th>
+                    <th>Win Rate</th>
+                    <th>Net P&L</th>
+                    <th>Return %</th>
+                    <th>Profit Factor</th>
+                    <th>Avg Win</th>
+                    <th>Avg Loss</th>
+                    <th>Max DD</th>
+                </tr>
+            </thead>
+            <tbody>
+                {rows}
+            </tbody>
+        </table>
+        """
+
+        return table_html
+
+    def _create_stock_comparison_chart(self) -> str:
+        """Generate bar chart comparing stock returns"""
+        if not self.results.stock_metrics:
+            return ""
+
+        symbols = list(self.results.stock_metrics.keys())
+        returns = [self.results.stock_metrics[s]['return_pct'] for s in symbols]
+        colors = ['green' if r > 0 else 'red' for r in returns]
+
+        fig = go.Figure()
+
+        fig.add_trace(go.Bar(
+            x=symbols,
+            y=returns,
+            marker_color=colors,
+            text=[f"{r:.2f}%" for r in returns],
+            textposition='outside',
+            name='Return %'
+        ))
+
+        fig.update_layout(
+            title='Stock Performance Comparison (Return %)',
+            xaxis_title='Symbol',
+            yaxis_title='Return %',
+            template='plotly_white',
+            height=400,
+            showlegend=False
+        )
+
+        # Add zero line
+        fig.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+
+        return fig.to_html(full_html=False, include_plotlyjs='cdn')
+
     def _build_html(self, equity_chart, drawdown_chart, pnl_dist_chart,
-                    monthly_returns_chart, hourly_dist_chart, trade_table) -> str:
+                    monthly_returns_chart, hourly_dist_chart, trade_table,
+                    stock_summary_table, stock_comparison_chart) -> str:
         """Build complete HTML report"""
         m = self.metrics
 
@@ -758,6 +950,14 @@ class ReportGenerator:
     <div class="metric-container">
         {metric_cards}
     </div>
+
+    <h2>Per-Stock Performance</h2>
+    <div class="chart-container">
+        {stock_comparison_chart}
+    </div>
+
+    <h2>Detailed Stock Comparison</h2>
+    {stock_summary_table}
 
     <h2>Equity Curve</h2>
     <div class="chart-container">
