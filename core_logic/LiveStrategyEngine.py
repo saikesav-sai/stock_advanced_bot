@@ -15,7 +15,7 @@ logger = get_logger()
 
 
 class LiveStrategyEngine:
-    def __init__(self, symbol=None, instrument_key=None):
+    def __init__(self, symbol, instrument_key=None):
         self.symbol = symbol  # ISIN code (e.g., INE467B01029)
         self.instrument_key = instrument_key  # Full key (e.g., NSE_EQ|INE467B01029)
         self.IST = pytz.timezone('Asia/Kolkata')
@@ -41,14 +41,14 @@ class LiveStrategyEngine:
             self._load_historical_data()
 
         # Strategy parameters
-        self.EMA_LEN = 200
+        self.EMA_LEN = 50
         self.VOL_LEN = 20 # set to 20
-        self.VOL_MULT = 1.2  # Relaxed from 1.5 - only need 20% volume increase
+        self.VOL_MULT = 0.5  # Relaxed from 1.5 - only need 20% volume increase
         self.RR = 1.2  # Relaxed from 1.6 - more achievable targets
-        self.VWAP_DIST = 0.05  # Relaxed from 0.15 - allow trades closer to VWAP
+        self.VWAP_DIST = 0.01  # Relaxed from 0.15 - allow trades closer to VWAP
         self.SL_BUFFER = 0.08
 
-        self.trade_start = 930 #changed startup time 915 -> 930 
+        self.trade_start = 915 #changed startup time 915 -> 930 
         self.trade_end = 1525
 
     def _load_historical_data(self):
@@ -144,17 +144,18 @@ class LiveStrategyEngine:
         else:
             # Update candle
             idx = self.df.index[-1]
-            self.df.at[idx, "high"] = max(self.df.at[idx, "high"], price)
-            self.df.at[idx, "low"] = min(self.df.at[idx, "low"], price)
-            self.df.at[idx, "close"] = price
-            self.df.at[idx, "volume"] += vol
+            self.df.at[idx, "high"] = max(float(self.df.at[idx, "high"]), float(price))
+            self.df.at[idx, "low"] = min(float(self.df.at[idx, "low"]), float(price))
+            self.df.at[idx, "close"] = float(price)
+            self.df.at[idx, "volume"] = int(self.df.at[idx, "volume"]) + int(vol)
 
         return self.process_strategy()
 
     
     def process_strategy(self):
-        if len(self.df) < 210:
-            logger.info(f"[{self.symbol}] Not enough data for strategy processing ({len(self.df)}/210 candles)")
+        MIN_CANDLES = self.EMA_LEN  + 10 
+        if len(self.df) < MIN_CANDLES:
+            logger.info(f"[{self.symbol}] Not enough data for strategy processing ({len(self.df)}/{MIN_CANDLES} candles)")
             return None
 
         df = self.df.copy()
@@ -172,8 +173,8 @@ class LiveStrategyEngine:
                 self.pdh = prev["high"].max()
                 self.pdl = prev["low"].min()
         # Indicators
-        
-        df["EMA200"] = df["close"].ewm(span=self.EMA_LEN).mean()
+
+        df["EMA"] = df["close"].ewm(span=self.EMA_LEN).mean()
         df["VWAP"] = (df["close"] * df["volume"]).cumsum() / df["volume"].cumsum()
         df["VolMA"] = df["volume"].rolling(self.VOL_LEN).mean()
 
@@ -194,13 +195,12 @@ class LiveStrategyEngine:
         vwap_ok = dist_pct >= self.VWAP_DIST
 
         # Trend
-        uptrend = row.close > row.EMA200
-        downtrend = row.close < row.EMA200
+        uptrend = row.close > row.EMA
+        downtrend = row.close < row.EMA
 
         # Breakouts
-        long_break = self.pdh is not None and row.close > self.pdh and prev.close <= self.pdh
-        short_break = self.pdl is not None and row.close < self.pdl and prev.close >= self.pdl
-
+        long_break = self.pdh is not None and row.high > self.pdh  # Simplified
+        short_break = self.pdl is not None and row.low < self.pdl  # Simplified
             
 
         # ===============================
@@ -235,12 +235,14 @@ class LiveStrategyEngine:
         # ===============================
         # ENTRY: LONG
         # ===============================
+        # Only enter if we don't already have an active position
         if (
             can_trade and
+            not self.active_position and  # No active trade
             vol_ok and
             vwap_ok and
             uptrend and
-            long_break 
+            long_break
         ):
             sl_vwap = row.VWAP * (1 - self.SL_BUFFER/100)
             sl = min(sl_vwap, row.low)
@@ -260,12 +262,14 @@ class LiveStrategyEngine:
         # ===============================
         # ENTRY: SHORT
         # ===============================
+        # Only enter if we don't already have an active position
         if (
             can_trade and
+            not self.active_position and  # No active trade
             vol_ok and
             vwap_ok and
             downtrend and
-            short_break 
+            short_break
         ):
             sl_vwap = row.VWAP * (1 + self.SL_BUFFER/100)
             sl = max(sl_vwap, row.high)
