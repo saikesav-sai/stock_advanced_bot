@@ -116,6 +116,7 @@ class TradingBotController:
                 result.append({
                     'instrument_key': symbol,
                     'name': 'Unknown',
+                    'isin': 'Unknown',
                     'trading_symbol': 'Unknown',
                     'exchange': 'Unknown'
                 })
@@ -310,18 +311,8 @@ async def _show_backtest_symbol_selection(query_or_update, controller, session=N
     if selected_count > 0:
         msg += f"✅ <b>Selected: {selected_count} stock(s)</b>\n\n"
 
-    # Show watchlist option
-    symbols_with_names = controller.get_symbols_with_names()
+    # Backtest uses only symbols from backtest_config.json
     keyboard = []
-
-    if symbols_with_names:
-        msg += f"<b>Current Watchlist ({len(symbols_with_names)} stocks):</b>\n"
-        for stock in symbols_with_names[:5]:  # Show first 5
-            msg += f"• {stock['name']}\n"
-        if len(symbols_with_names) > 5:
-            msg += f"• ...and {len(symbols_with_names) - 5} more\n"
-        msg += "\n"
-        keyboard.append([InlineKeyboardButton("✅ Use Watchlist", callback_data="backtest_use_watchlist")])
 
     # Add/Continue buttons
     keyboard.append([InlineKeyboardButton("➕ Add Stocks", callback_data="backtest_add_symbol")])
@@ -501,39 +492,25 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
 
         elif data == "backtest_run":
-            # Initialize backtest session with user defaults
+            # Load last used config as defaults
             backtest_controller = get_backtest_controller()
-            defaults = backtest_controller.get_user_defaults(str(user_id))
+            last_config = backtest_controller.load_last_config()
 
             session = BacktestSessionData(
-                symbols=defaults.get('symbols', []),
-                start_date=defaults.get('start_date', ''),
-                end_date=defaults.get('end_date', ''),
-                initial_capital=defaults.get('initial_capital', 100000),
-                position_size=defaults.get('position_size', 10000),
-                strategy=defaults.get('strategy', 'Strategy1'),
-                interval=defaults.get('interval', '5')
+                symbols=last_config.get('symbols', []),
+                start_date=last_config.get('start_date', ''),
+                end_date=last_config.get('end_date', ''),
+                initial_capital=last_config.get('initial_capital', 100000),
+                position_size=last_config.get('position_size', 10000),
+                strategy=last_config.get('strategy', 'Strategy1'),
+                interval=last_config.get('interval', '5')
             )
             context.user_data['backtest_session'] = session
 
-            # Show info if defaults were loaded
-            if defaults.get('symbols'):
-                await query.answer(f"Loaded {len(defaults['symbols'])} saved symbols", show_alert=False)
+            # Show info if config was loaded
+            if last_config.get('symbols'):
+                await query.answer(f"Loaded {len(last_config['symbols'])} stocks from last backtest", show_alert=False)
 
-            await _show_backtest_symbol_selection(query, controller, session)
-
-        elif data == "backtest_use_watchlist":
-            session = context.user_data.get('backtest_session')
-            if not session:
-                await query.answer("Session expired. Please start again.", show_alert=True)
-                return
-
-            # Load watchlist symbols
-            symbols_with_names = controller.get_symbols_with_names()
-            session.symbols = [stock['isin'] for stock in symbols_with_names]
-
-            # Return to symbol selection to show selection and allow more additions
-            await query.answer(f"✅ Added {len(symbols_with_names)} stocks from watchlist")
             await _show_backtest_symbol_selection(query, controller, session)
 
         elif data == "backtest_continue_to_dates":
@@ -541,13 +518,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if not session or not session.symbols:
                 await query.answer("Please select at least one symbol first", show_alert=True)
                 return
-
-            # Save selected symbols to user defaults
-            backtest_controller = get_backtest_controller()
-            backtest_controller.save_user_defaults(
-                user_id=str(user_id),
-                symbols=session.symbols
-            )
 
             lookup = get_lookup()
             stock_names = []
@@ -564,9 +534,9 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if len(session.symbols) > 10:
                 msg += f"• ...and {len(session.symbols) - 10} more\n"
 
-            # Show saved dates if available
+            # Show last used dates if available
             if session.start_date and session.end_date:
-                msg += f"\n<i>Last used dates: {session.start_date} to {session.end_date}</i>\n"
+                msg += f"\n<i>Last used: {session.start_date} to {session.end_date}</i>\n"
 
             msg += "\n📅 <b>Enter Start Date</b>\n\n"
             msg += "Send the start date in <code>YYYY-MM-DD</code> format.\n\n"
@@ -974,14 +944,6 @@ async def backtest_end_date_handler(update: Update, context: ContextTypes.DEFAUL
 
         session.end_date = end_date
 
-        # Save dates to user defaults
-        backtest_controller = get_backtest_controller()
-        backtest_controller.save_user_defaults(
-            user_id=str(user_id),
-            start_date=session.start_date,
-            end_date=session.end_date
-        )
-
         # Show confirmation summary
         days = (end - start).days
         msg = (
@@ -1080,7 +1042,6 @@ async def backtest_confirm_handler(update: Update, context: ContextTypes.DEFAULT
 
         # Create config and run backtest asynchronously
         config_path = backtest_controller.create_user_config(
-            user_id=str(user_id),
             symbols=session.symbols,
             start_date=session.start_date,
             end_date=session.end_date,
@@ -1138,13 +1099,6 @@ async def backtest_capital_handler(update: Update, context: ContextTypes.DEFAULT
 
         session.initial_capital = capital
 
-        # Save capital to user defaults
-        backtest_controller = get_backtest_controller()
-        backtest_controller.save_user_defaults(
-            user_id=str(user_id),
-            initial_capital=session.initial_capital
-        )
-
         msg = (
             f"✅ <b>Capital Set:</b> ₹{capital:,.0f}\n\n"
             "💰 <b>Change Position Size</b>\n\n"
@@ -1195,13 +1149,6 @@ async def backtest_position_handler(update: Update, context: ContextTypes.DEFAUL
             return BACKTEST_ENTERING_POSITION_SIZE
 
         session.position_size = position
-
-        # Save position size to user defaults
-        backtest_controller = get_backtest_controller()
-        backtest_controller.save_user_defaults(
-            user_id=str(user_id),
-            position_size=session.position_size
-        )
 
         # Show final confirmation
         lookup = get_lookup()
@@ -1625,7 +1572,6 @@ def main():
     # Conversation handler for backtesting
     backtest_conv_handler = ConversationHandler(
         entry_points=[
-            CallbackQueryHandler(button_handler, pattern="^backtest_use_watchlist$"),
             CallbackQueryHandler(button_handler, pattern="^backtest_add_symbol$"),
             CallbackQueryHandler(button_handler, pattern="^backtest_continue_to_dates$"),
         ],

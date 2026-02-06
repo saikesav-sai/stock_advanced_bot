@@ -34,7 +34,7 @@ class BacktestController:
         self.config_dir = self.base_dir / "configs"
         self.report_dir = self.base_dir / "reports"
         self.manifest_path = self.report_dir / "manifest.json"
-        self.template_path = self.config_dir / "template_config.json"
+        self.config_path = self.config_dir / "backtest_config.json"
         self.database_path = self.base_dir.parent / "back_testing_market_data.db"
 
         # Ensure directories exist
@@ -54,7 +54,6 @@ class BacktestController:
 
     def create_user_config(
         self,
-        user_id: str,
         symbols: List[str],
         start_date: str,
         end_date: str,
@@ -66,10 +65,9 @@ class BacktestController:
         slippage_pct: float = 0.05
     ) -> str:
         """
-        Generate config JSON from user inputs.
+        Generate config JSON and write to shared config file.
 
         Args:
-            user_id: Telegram user ID
             symbols: List of ISINs
             start_date: YYYY-MM-DD
             end_date: YYYY-MM-DD
@@ -81,17 +79,16 @@ class BacktestController:
             slippage_pct: Slippage in basis points
 
         Returns:
-            Path to generated config file
+            Path to config file
         """
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        config_path = self.config_dir / f"user_{user_id}_session_{timestamp}.json"
 
         # Build instrument_keys mapping
         instrument_keys = {isin: f"NSE_EQ|{isin}" for isin in symbols}
 
         config = {
             "backtest_config": {
-                "name": f"TelegramBacktest_{user_id}_{timestamp}",
+                "name": f"TelegramBacktest_{timestamp}",
                 "description": f"Backtest from Telegram - {start_date} to {end_date}",
                 "data": {
                     "symbols": symbols,
@@ -121,88 +118,54 @@ class BacktestController:
             }
         }
 
-        with open(config_path, 'w') as f:
+        with open(self.config_path, 'w') as f:
             json.dump(config, f, indent=2)
 
-        logger.info(f"Created config for user {user_id}: {config_path}")
-        return str(config_path)
+        logger.info(f"Created backtest config: {self.config_path}")
+        return str(self.config_path)
 
-    def get_user_defaults(self, user_id: str) -> Dict:
+    def load_last_config(self) -> Dict:
         """
-        Load user's default backtest settings.
+        Load the last used backtest configuration.
 
-        Returns dict with: symbols, start_date, end_date, initial_capital, position_size
+        Returns dict with: symbols, start_date, end_date, initial_capital, position_size, etc.
+        Returns system defaults if config doesn't exist.
         """
-        defaults_path = self.config_dir / f"user_{user_id}_defaults.json"
-
-        if defaults_path.exists():
+        if self.config_path.exists():
             try:
-                with open(defaults_path) as f:
-                    return json.load(f)
+                with open(self.config_path) as f:
+                    config = json.load(f)
+                    bt_config = config.get('backtest_config', {})
+                    data = bt_config.get('data', {})
+                    execution = bt_config.get('execution', {})
+                    strategy = bt_config.get('strategy', {})
+
+                    return {
+                        'symbols': data.get('symbols', []),
+                        'start_date': data.get('start_date', ''),
+                        'end_date': data.get('end_date', ''),
+                        'initial_capital': execution.get('initial_capital', 100000),
+                        'position_size': execution.get('position_size', 10000),
+                        'strategy': strategy.get('class', 'Strategy1'),
+                        'interval': data.get('interval', '5'),
+                        'commission_pct': execution.get('commission_pct', 0.05),
+                        'slippage_pct': execution.get('slippage_pct', 0.05)
+                    }
             except Exception as e:
-                logger.warning(f"Failed to load user defaults: {e}")
+                logger.warning(f"Failed to load last config: {e}")
 
-        # Return system defaults
+        # Return system defaults if config doesn't exist or failed to load
         return {
-            "symbols": [],
-            "start_date": "",
-            "end_date": "",
-            "initial_capital": 100000,
-            "position_size": 10000,
-            "strategy": "Strategy1",
-            "interval": "5",
-            "commission_pct": 0.05,
-            "slippage_pct": 0.05
+            'symbols': [],
+            'start_date': '',
+            'end_date': '',
+            'initial_capital': 100000,
+            'position_size': 10000,
+            'strategy': 'Strategy1',
+            'interval': '5',
+            'commission_pct': 0.05,
+            'slippage_pct': 0.05
         }
-
-    def save_user_defaults(
-        self,
-        user_id: str,
-        symbols: List[str] = None,
-        start_date: str = None,
-        end_date: str = None,
-        initial_capital: float = None,
-        position_size: float = None,
-        strategy: str = None,
-        interval: str = None
-    ):
-        """
-        Save user's default backtest settings.
-        Only updates provided parameters, preserves others.
-        """
-        defaults_path = self.config_dir / f"user_{user_id}_defaults.json"
-
-        # Load existing or create new
-        if defaults_path.exists():
-            try:
-                with open(defaults_path) as f:
-                    defaults = json.load(f)
-            except:
-                defaults = {}
-        else:
-            defaults = {}
-
-        # Update only provided values
-        if symbols is not None:
-            defaults['symbols'] = symbols
-        if start_date is not None:
-            defaults['start_date'] = start_date
-        if end_date is not None:
-            defaults['end_date'] = end_date
-        if initial_capital is not None:
-            defaults['initial_capital'] = initial_capital
-        if position_size is not None:
-            defaults['position_size'] = position_size
-        if strategy is not None:
-            defaults['strategy'] = strategy
-        if interval is not None:
-            defaults['interval'] = interval
-
-        # Save
-        with open(defaults_path, 'w') as f:
-            json.dump(defaults, f, indent=2)
-
-        logger.info(f"Saved defaults for user {user_id}")
 
     def validate_backtest_params(
         self,
