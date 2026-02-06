@@ -10,7 +10,7 @@ import requests
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from core_logic.logger_config import get_logger
 from telegram_bot.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_IDS
-
+from telegram_bot.symbol_lookup import SymbolLookup
 logger = get_logger()
 
 TELEGRAM_API = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
@@ -56,7 +56,7 @@ def send_telegram_alert(text, parse_mode="Markdown"):
     return success_count > 0
 
 
-def format_signal_message(symbol, signal_data):
+def format_signal_message(symbol_type, symbol, signal_data):
     """
     Format trading signal into a Telegram message
     
@@ -67,6 +67,9 @@ def format_signal_message(symbol, signal_data):
     Returns:
         str: Formatted message
     """
+    symbol_lookup = SymbolLookup()
+    stock_name =f"{symbol_type} | {symbol_lookup.get_name_by_isin(symbol)}"
+
     signal_type = signal_data.get("signal", "UNKNOWN")
     
     if signal_type in ["BUY", "SELL"]:
@@ -76,11 +79,11 @@ def format_signal_message(symbol, signal_data):
         
         emoji = "🚀" if signal_type == "BUY" else "💣"
         
-        message = f"{emoji} *{signal_type} SIGNAL* - `{symbol}`\n\n"
-        message += f"📍 Entry Price: `{entry:.2f}`\n"
-        message += f"🛑 Stop Loss: `{sl:.2f}`\n"
-        message += f"🎯 Take Profit: `{tp:.2f}`\n"
-        message += f"📊 Risk/Reward: `{signal_data.get('rr', 1.6):.2f}`\n"
+        message = f"{emoji} *{signal_type} SIGNAL* - `{stock_name}`\n\n"
+        message += f"Entry Price: `{entry:.2f}`\n"
+        message += f"Stop Loss: `{sl:.2f}`\n"
+        message += f"Take Profit: `{tp:.2f}`\n"
+        message += f"Risk/Reward: `{signal_data.get('rr', 1.6):.2f}`\n"
         
         return message
     
@@ -90,14 +93,14 @@ def format_signal_message(symbol, signal_data):
         
         emoji = "✅" if reason == "TP HIT" else "❌"
         
-        message = f"{emoji} *EXIT SIGNAL* - `{symbol}`\n\n"
-        message += f"📍 Exit Price: `{exit_price:.2f}`\n"
-        message += f"📝 Reason: `{reason}`\n"
+        message = f"{emoji} *EXIT SIGNAL* - `{stock_name}`\n\n"
+        message += f"Exit Price: `{exit_price:.2f}`\n"
+        message += f"Reason: `{reason}`\n"
         
         return message
     
     else:
-        return f"⚠️ *UNKNOWN SIGNAL* - `{symbol}`\n{signal_data}"
+        return f"⚠️ *UNKNOWN SIGNAL* - `{stock_name}`\n{signal_data}"
 
 
 def send_status_update(symbol, status_info):
@@ -108,7 +111,7 @@ def send_status_update(symbol, status_info):
         symbol: Stock symbol
         status_info: Dictionary with status information
     """
-    message = f"📊 *Status Update* - `{symbol}`\n\n"
+    message = f"*Status Update* - `{symbol}`\n\n"
     
     for key, value in status_info.items():
         message += f"{key}: `{value}`\n"
