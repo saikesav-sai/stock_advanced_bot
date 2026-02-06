@@ -274,26 +274,40 @@ class BacktestController:
                 # Add to manifest
                 self._add_to_manifest(user_id, report_filename, summary)
 
-                # Send completion notification
-                await self._send_completion_notification(
-                    context, user_id, summary, report_path
-                )
+                # Send completion notification (with built-in retry logic)
+                try:
+                    await self._send_completion_notification(
+                        context, user_id, summary, report_path
+                    )
+                except Exception as e:
+                    # Notification failed but backtest succeeded
+                    logger.error(f"Failed to send completion notification after retries: {e}")
+                    # Don't raise - backtest completed successfully
 
                 logger.info(f"Backtest completed for user {user_id}")
             else:
                 # Parse error
                 error_msg = self._parse_error(result.stderr)
-                await self._send_error_notification(context, user_id, error_msg)
+                try:
+                    await self._send_error_notification(context, user_id, error_msg)
+                except Exception as e:
+                    logger.error(f"Failed to send error notification after retries: {e}")
                 logger.error(f"Backtest failed for user {user_id}: {error_msg}")
 
         except subprocess.TimeoutExpired:
-            await self._send_error_notification(
-                context, user_id, "Backtest timed out (exceeded 5 minutes)"
-            )
+            try:
+                await self._send_error_notification(
+                    context, user_id, "Backtest timed out (exceeded 5 minutes)"
+                )
+            except Exception as e:
+                logger.error(f"Failed to send timeout notification: {e}")
             logger.error(f"Backtest timeout for user {user_id}")
 
         except Exception as e:
-            await self._send_error_notification(context, user_id, str(e))
+            try:
+                await self._send_error_notification(context, user_id, str(e))
+            except Exception as notify_error:
+                logger.error(f"Failed to send error notification: {notify_error}")
             logger.exception(f"Backtest error for user {user_id}")
 
     def _parse_backtest_output(self, stdout: str, config_path: str) -> Dict:
@@ -440,29 +454,50 @@ class BacktestController:
 
         message += "\n📄 <i>Full interactive report attached below</i>"
 
-        # Send summary
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=message,
-            parse_mode=ParseMode.HTML
-        )
-
-        # Send HTML report file
-        if report_path.exists():
+        # Send summary with retry logic
+        max_retries = 3
+        for attempt in range(max_retries):
             try:
-                with open(report_path, 'rb') as f:
-                    await context.bot.send_document(
-                        chat_id=user_id,
-                        document=f,
-                        filename=report_path.name,
-                        caption="Open this file in your browser for full interactive charts"
-                    )
-            except Exception as e:
-                logger.error(f"Failed to send report file: {e}")
                 await context.bot.send_message(
                     chat_id=user_id,
-                    text=f"⚠️ Report generated but failed to upload: {report_path}"
+                    text=message,
+                    parse_mode=ParseMode.HTML
                 )
+                break  # Success, exit retry loop
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Failed to send summary (attempt {attempt + 1}/{max_retries}): {e}")
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff: 1s, 2s, 4s
+                else:
+                    logger.error(f"Failed to send summary after {max_retries} attempts: {e}")
+                    # Don't raise, continue to try sending the file
+
+        # Send HTML report file with retry logic
+        if report_path.exists():
+            for attempt in range(max_retries):
+                try:
+                    with open(report_path, 'rb') as f:
+                        await context.bot.send_document(
+                            chat_id=user_id,
+                            document=f,
+                            filename=report_path.name,
+                            caption="Open this file in your browser for full interactive charts"
+                        )
+                    break  # Success, exit retry loop
+                except Exception as e:
+                    if attempt < max_retries - 1:
+                        logger.warning(f"Failed to send report file (attempt {attempt + 1}/{max_retries}): {e}")
+                        await asyncio.sleep(2 ** attempt)
+                    else:
+                        logger.error(f"Failed to send report file after {max_retries} attempts: {e}")
+                        # Try to notify user about the failure
+                        try:
+                            await context.bot.send_message(
+                                chat_id=user_id,
+                                text=f"⚠️ Report generated but failed to upload. Location: {report_path}"
+                            )
+                        except:
+                            pass  # If even this fails, give up
 
     async def _send_error_notification(
         self,
@@ -477,11 +512,23 @@ class BacktestController:
             "Please check your inputs and try again."
         )
 
-        await context.bot.send_message(
-            chat_id=user_id,
-            text=message,
-            parse_mode=ParseMode.HTML
-        )
+        # Send with retry logic
+        max_retries = 3
+        for attempt in range(max_retries):
+            try:
+                await context.bot.send_message(
+                    chat_id=user_id,
+                    text=message,
+                    parse_mode=ParseMode.HTML
+                )
+                break  # Success
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    logger.warning(f"Failed to send error notification (attempt {attempt + 1}/{max_retries}): {e}")
+                    await asyncio.sleep(2 ** attempt)
+                else:
+                    logger.error(f"Failed to send error notification after {max_retries} attempts: {e}")
+                    # Can't notify user, just log it
 
     def _add_to_manifest(self, user_id: str, report_filename: str, summary: Dict):
         """Add report entry to manifest."""
