@@ -20,6 +20,12 @@ logger = get_logger()
 
 def main():
     """Main CLI function"""
+    # Configure stdout/stderr to use UTF-8 encoding for rupee symbol (₹) support on Windows
+    import io
+    if sys.platform == "win32":
+        sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8', errors='replace')
+        sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8', errors='replace')
+
     parser = argparse.ArgumentParser(
         description='Stock Advanced Bot - Backtesting Framework',
         formatter_class=argparse.RawDescriptionHelpFormatter,
