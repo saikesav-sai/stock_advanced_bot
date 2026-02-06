@@ -10,7 +10,7 @@ from core_logic.logger_config import get_logger
 from telegram_bot.telegram_alerts import (format_signal_message,
                                           send_telegram_alert)
 
-load_dotenv()
+load_dotenv(override=True)
 
 # Get logger instance
 logger = get_logger()

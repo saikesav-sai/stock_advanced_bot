@@ -181,10 +181,17 @@ class TradingBotController:
 
             log_file = open(log_file_path, "a")
 
+            # Build a fresh environment so the subprocess reads
+            # the latest .env values instead of inheriting stale ones
+            fresh_env = os.environ.copy()
+            env_vars = self.read_env()
+            fresh_env.update(env_vars)
+
             trading_process = subprocess.Popen(
                 [sys.executable, str(self.main_script)],
                 stdout=log_file,
-                stderr=log_file
+                stderr=log_file,
+                env=fresh_env
             )
             trading_status = "running"
             logger.info("Trading bot started successfully")
