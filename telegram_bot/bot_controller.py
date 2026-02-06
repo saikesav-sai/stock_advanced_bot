@@ -418,31 +418,6 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 await query.edit_message_text(
                     f"❌ {message}\n\nUse /menu to return to main menu."
                 )
-        
-        elif data == "config":
-            env_vars = controller.read_env()
-            msg = "⚙️ <b>Current Configuration</b>\n\n"
-            
-            config_items = {
-                'INTERVAL': 'Candle Interval',
-                'EMA_LENGTH': 'EMA Length',
-                'VOL_LENGTH': 'Volume Length',
-                'VOL_MULTIPLIER': 'Volume Multiplier',
-                'RISK_REWARD': 'Risk/Reward Ratio',
-                'VWAP_DISTANCE': 'VWAP Distance',
-                'SL_BUFFER': 'Stop Loss Buffer',
-                'TRADE_START_TIME': 'Trading Start',
-                'TRADE_END_TIME': 'Trading End'
-            }
-            
-            for key, label in config_items.items():
-                value = env_vars.get(key, 'Not set')
-                msg += f"• {label}: <code>{value}</code>\n"
-            
-            keyboard = [[InlineKeyboardButton("🔙 Back", callback_data="main_menu")]]
-            reply_markup = InlineKeyboardMarkup(keyboard)
-            await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
-        
         elif data == "help":
             help_msg = (
                 "❓ <b>Help &amp; Commands</b>\n\n"
@@ -476,10 +451,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
                     InlineKeyboardButton("📈 Stocks", callback_data="stocks_menu")
                 ],
                 [
-                    InlineKeyboardButton("⚙️ Config", callback_data="config"),
-                    InlineKeyboardButton("🔑 Token", callback_data="token_menu")
-                ],
-                [
+                    InlineKeyboardButton("🔑 Token", callback_data="token_menu"),
                     InlineKeyboardButton("❓ Help", callback_data="help")
                 ]
             ]
@@ -669,10 +641,7 @@ async def menu(update: Update, context: ContextTypes.DEFAULT_TYPE):
             InlineKeyboardButton("📈 Stocks", callback_data="stocks_menu")
         ],
         [
-            InlineKeyboardButton("⚙️ Config", callback_data="config"),
-            InlineKeyboardButton("🔑 Token", callback_data="token_menu")
-        ],
-        [
+            InlineKeyboardButton("🔑 Token", callback_data="token_menu"),
             InlineKeyboardButton("❓ Help", callback_data="help")
         ]
     ]
