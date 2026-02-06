@@ -57,16 +57,17 @@ def on_message(msg):
         
         ltp = feed["marketFF"]["ltpc"]["ltp"]
         symbol = engine.symbol
+        symbol_type = instrument_key.split("|")[0] if "|" in instrument_key else "UNKNOWN"
         
         if result:
-            logger.info(f"[{symbol}] SIGNAL: {result}")
+            logger.info(f"[{symbol_type}|{symbol}] SIGNAL: {result}")
             
             # Send Telegram alert
             try:
-                telegram_message = format_signal_message(symbol, result)
+                telegram_message = format_signal_message(symbol_type, symbol, result)
                 send_telegram_alert(telegram_message)
             except Exception as e:
-                logger.error(f"[{symbol}] Error sending Telegram alert: {e}")
+                logger.error(f"[{symbol_type}|{symbol}] Error sending Telegram alert: {e}")
 
 
 def start_streamer():

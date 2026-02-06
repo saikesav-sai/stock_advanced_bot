@@ -3,6 +3,7 @@
 *.log
 **/__pycache__/
 **/reports/
+/back_testing/*.json
 /venv
 /stock_advanced_bot_env
 /logs
