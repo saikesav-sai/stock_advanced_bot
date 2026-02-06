@@ -1,16 +1,17 @@
 import os
 import sys
 from datetime import datetime, timedelta
-from typing import Dict, List, Tuple, Optional
+from typing import Dict, List, Optional, Tuple
+
 import pandas as pd
 import pytz
 
 # Add parent directory to path for imports
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
+from core_logic.logger_config import get_logger
 from database_logic.candle_db import CandleDB
 from database_logic.fetch_historical_candles import UpstoxHistoricalFetcher
-from core_logic.logger_config import get_logger
 
 logger = get_logger()
 
@@ -35,9 +36,32 @@ class BacktestDataLoader:
         self.IST = pytz.timezone('Asia/Kolkata')
         logger.info(f"Initialized BacktestDataLoader with interval={interval}, auto_fetch={auto_fetch}")
 
+    def _get_working_dates(self, start_date: str, end_date: str) -> List[datetime.date]:
+        """
+        Get list of working dates (weekdays only) between start and end dates
+
+        Args:
+            start_date: Start date in YYYY-MM-DD format
+            end_date: End date in YYYY-MM-DD format
+
+        Returns:
+            List of datetime.date objects (Monday-Friday only)
+        """
+        start_dt = datetime.strptime(start_date, '%Y-%m-%d').date()
+        end_dt = datetime.strptime(end_date, '%Y-%m-%d').date()
+
+        working_dates = []
+        current_date = start_dt
+        while current_date <= end_dt:
+            if current_date.weekday() < 5:  # Monday=0 to Friday=4
+                working_dates.append(current_date)
+            current_date += timedelta(days=1)
+
+        return working_dates
+
     def load_data(self, symbol: str, start_date: str, end_date: str, instrument_key: str = None) -> pd.DataFrame:
         """
-        Load candles from database with validation. If no data found, automatically fetch from Upstox.
+        Load candles from database with validation. If data is missing for any dates, automatically fetch from Upstox.
 
         Args:
             symbol: ISIN code (e.g., "INE467B01029")
@@ -53,44 +77,62 @@ class BacktestDataLoader:
         # Load candles from database
         df = self.db.get_candles(symbol, start_date, end_date, self.interval)
 
-        if len(df) == 0:
-            logger.warning(f"No data found for {symbol} in date range {start_date} to {end_date}")
+        expected_dates = set(self._get_working_dates(start_date, end_date))
+
+        # Get actual dates present in database
+        if len(df) > 0:
+            actual_dates = set(df['timestamp'].dt.date.unique())
+        else:
+            actual_dates = set()
+
+        missing_dates = expected_dates - actual_dates
+        percentage_missing = (len(missing_dates) / len(expected_dates)) * 100 if len(expected_dates) > 0 else 0
+
+        if percentage_missing > 30:  # If more than 30% of expected dates are missing, log a warning and fetch them
+            logger.warning(f"Missing data for {len(missing_dates)} working days out of {len(expected_dates)} expected for {symbol}")
+            logger.info(f"Missing dates: {sorted(missing_dates)[:10]}{'...' if len(missing_dates) > 10 else ''}")
 
             if self.auto_fetch:
-                logger.info("Attempting to fetch historical data from Upstox...")
+                logger.info(f"Attempting to fetch missing historical data from Upstox for {len(missing_dates)} dates...")
 
                 # Construct instrument_key if not provided
                 if instrument_key is None:
                     instrument_key = f"NSE_EQ|{symbol}"
                     logger.info(f"Using constructed instrument_key: {instrument_key}")
 
-                # Calculate number of days to fetch
-                start_dt = datetime.strptime(start_date, '%Y-%m-%d')
-                end_dt = datetime.strptime(end_date, '%Y-%m-%d')
-                
-
                 try:
-                    # Fetch historical data
+                    # Fetch historical data for the entire range (fetcher will handle individual dates)
                     fetcher = UpstoxHistoricalFetcher(root_db_path=self.db.db_path)
-                    fetcher.fetch_and_store_candles(instrument_key,start_date=start_date,end_date=end_date)
+                    fetcher.fetch_and_store_candles(instrument_key, start_date=start_date, end_date=end_date)
                     fetcher.close()
 
                     logger.info(f"Successfully fetched historical data for {symbol}")
 
-                    # Retry loading from database
+                    # Reload from database to get complete data
                     df = self.db.get_candles(symbol, start_date, end_date, self.interval)
 
-                    if len(df) == 0:
-                        logger.error(f"Still no data after fetching for {symbol}")
+                    # Recheck missing dates after fetch
+                    if len(df) > 0:
+                        actual_dates_after = set(df['timestamp'].dt.date.unique())
+                        still_missing = expected_dates - actual_dates_after
+                        if len(still_missing) > 0:
+                            logger.warning(f"Still missing data for {len(still_missing)} dates after fetching: {sorted(still_missing)[:5]}")
+                        else:
+                            logger.info(f"Successfully loaded complete data: {len(df)} candles across {len(actual_dates_after)} days")
                     else:
-                        logger.info(f"Loaded {len(df)} candles after fetching")
+                        logger.error(f"Still no data after fetching for {symbol}")
 
                 except Exception as e:
                     logger.error(f"Failed to fetch historical data: {e}")
                     logger.warning("Make sure UPSTOX_ACCESS_TOKEN is set in environment variables")
-                    return df
-            else:
-                return df
+                    # Continue with whatever data we have
+        else:
+            logger.info(f"Complete data available: {len(df)} candles across {len(actual_dates)} days")
+
+        # If still no data at all, return empty dataframe
+        if len(df) == 0:
+            logger.error(f"No data available for {symbol} from {start_date} to {end_date}")
+            return df
 
         # Ensure data types are correct
         df["open"] = pd.to_numeric(df["open"], errors='coerce')
