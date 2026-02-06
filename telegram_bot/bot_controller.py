@@ -405,7 +405,7 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             
             if success:
                 await query.edit_message_text(
-                    f"✅ {message}\n\nUse /menu to return to main menu."
+                    f"✅ {message}\n\n Takes Effect after restart \n \nUse /menu to return to main menu."
                 )
             else:
                 await query.edit_message_text(
@@ -618,7 +618,7 @@ async def add_stock_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if success:
         await update.message.reply_text(
-            f"✅ {message}\n\n<b>Stock Details:</b>\n"
+            f"✅ {message}\n\n Takes Effect after restart \n \n<b>Stock Details:</b>\n"
             f"Name: {selected_stock['name']}\n"
             f"Symbol: <code>{selected_stock['trading_symbol']}</code>\n"
             f"Exchange: {exchange}\n\n"
