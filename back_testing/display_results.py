@@ -13,6 +13,7 @@ from plotly.subplots import make_subplots
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 
 from core_logic.logger_config import get_logger
+from telegram_bot.symbol_lookup import SymbolLookup
 
 logger = get_logger()
 
@@ -358,6 +359,18 @@ class ReportGenerator:
         """
         self.results = results
         self.metrics = results.metrics
+        self.lookup = SymbolLookup()
+        self._symbol_name_cache = {}  # Cache for ISIN to name lookups
+
+    def _get_stock_name(self, isin: str) -> str:
+        """Get stock name from ISIN, with caching"""
+        if isin not in self._symbol_name_cache:
+            name = self.lookup.get_name_by_isin(isin)
+            if name:
+                self._symbol_name_cache[isin] = name
+            else:
+                self._symbol_name_cache[isin] = isin  # Fallback to ISIN
+        return self._symbol_name_cache[isin]
 
     def generate_report(self, output_path: str) -> str:
         """
@@ -418,14 +431,15 @@ class ReportGenerator:
         for idx, symbol in enumerate(stock_symbols):
             stock_data = self.results.stock_results[symbol]
             stock_equity_curve = pd.DataFrame(stock_data['equity_curve'])
-            
+
             if len(stock_equity_curve) > 0:
                 color = colors[idx % len(colors)]
+                stock_name = self._get_stock_name(symbol)
                 fig.add_trace(go.Scatter(
                     x=stock_equity_curve['timestamp'],
                     y=stock_equity_curve['equity'],
                     mode='lines',
-                    name=symbol,
+                    name=stock_name,
                     line=dict(color=color, width=2)
                 ))
 
@@ -502,22 +516,23 @@ class ReportGenerator:
         for idx, symbol in enumerate(stock_symbols):
             stock_data = self.results.stock_results[symbol]
             stock_equity_curve = pd.DataFrame(stock_data['equity_curve'])
-            
+
             if len(stock_equity_curve) > 0:
                 equity = stock_equity_curve['equity']
                 running_max = equity.expanding().max()
                 drawdown = (equity - running_max) / running_max * 100
-                
+
                 color = colors[idx % len(colors)]
                 # Convert hex color to rgba for fill
                 rgb = tuple(int(color.lstrip('#')[i:i+2], 16) for i in (0, 2, 4))
                 fillcolor = f'rgba({rgb[0]}, {rgb[1]}, {rgb[2]}, 0.3)'
-                
+
+                stock_name = self._get_stock_name(symbol)
                 fig.add_trace(go.Scatter(
                     x=stock_equity_curve['timestamp'],
                     y=drawdown,
                     fill='tozeroy',
-                    name=symbol,
+                    name=stock_name,
                     line=dict(color=color, width=2),
                     fillcolor=fillcolor
                 ))
@@ -724,9 +739,10 @@ class ReportGenerator:
         rows = ""
         for symbol, metrics in self.results.stock_metrics.items():
             return_class = "positive" if metrics['return_pct'] > 0 else "negative"
+            stock_name = self._get_stock_name(symbol)
             rows += f"""
             <tr>
-                <td><strong>{symbol}</strong></td>
+                <td><strong>{stock_name}</strong></td>
                 <td>{metrics['total_trades']}</td>
                 <td>{metrics['winning_trades']}</td>
                 <td>{metrics['losing_trades']}</td>
@@ -771,13 +787,14 @@ class ReportGenerator:
             return ""
 
         symbols = list(self.results.stock_metrics.keys())
+        stock_names = [self._get_stock_name(s) for s in symbols]
         returns = [self.results.stock_metrics[s]['return_pct'] for s in symbols]
         colors = ['green' if r > 0 else 'red' for r in returns]
 
         fig = go.Figure()
 
         fig.add_trace(go.Bar(
-            x=symbols,
+            x=stock_names,
             y=returns,
             marker_color=colors,
             text=[f"{r:.2f}%" for r in returns],
@@ -940,7 +957,7 @@ class ReportGenerator:
 
     <div class="config-info">
         <strong>Period:</strong> {self.results.config['data']['start_date']} to {self.results.config['data']['end_date']}<br>
-        <strong>Symbol:</strong> {', '.join(self.results.config['data']['symbols'])}<br>
+        <strong>Stocks:</strong> {', '.join([self._get_stock_name(s) for s in self.results.config['data']['symbols']])}<br>
         <strong>Strategy:</strong> {self.results.config['strategy']['class']}<br>
         <strong>Initial Capital:</strong> ₹{m['initial_capital']:,.2f}<br>
         <strong>Final Equity:</strong> ₹{m['final_equity']:,.2f}

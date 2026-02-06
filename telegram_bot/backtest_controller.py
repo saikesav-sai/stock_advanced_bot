@@ -19,6 +19,7 @@ from telegram.constants import ParseMode
 from telegram.ext import ContextTypes
 sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
 from core_logic.logger_config import get_logger
+from telegram_bot.symbol_lookup import SymbolLookup
 
 logger = get_logger()
 
@@ -308,15 +309,27 @@ class BacktestController:
             "total_trades": 0,
             "win_rate": 0.0,
             "symbols_count": 0,
+            "symbols_names": [],
             "max_drawdown": 0.0,
             "sharpe_ratio": 0.0
         }
 
         try:
-            # Load config to get symbols count
+            # Load config to get symbols count and names
             with open(config_path) as f:
                 config = json.load(f)
-                summary["symbols_count"] = len(config["backtest_config"]["data"]["symbols"])
+                isins = config["backtest_config"]["data"]["symbols"]
+                summary["symbols_count"] = len(isins)
+
+                # Look up stock names from ISINs
+                lookup = SymbolLookup()
+                for isin in isins:
+                    name = lookup.get_name_by_isin(isin)
+                    if name:
+                        summary["symbols_names"].append(name)
+                    else:
+                        summary["symbols_names"].append(isin)  # Fallback to ISIN if not found
+
 
             # Parse output for metrics (looking for common patterns)
             lines = stdout.split('\n')
@@ -404,10 +417,17 @@ class BacktestController:
     ):
         """Send backtest results with summary and HTML file."""
         # Format summary message
-        message = (
-            "✅ <b>Backtest Complete!</b>\n\n"
+        message = "✅ <b>Backtest Complete!</b>\n\n"
+
+        # Display stock names
+        if summary.get('symbols_names'):
+            message += "📈 <b>Stocks:</b>\n"
+            for name in summary['symbols_names']:
+                message += f"  • {name}\n"
+            message += "\n"
+
+        message += (
             "📊 <b>Summary:</b>\n"
-            f"• Stocks: {summary['symbols_count']}\n"
             f"• Total Return: <b>{summary['total_return']:+.2f}%</b>\n"
             f"• Net P&L: ₹{summary['net_pnl']:,.2f}\n"
             f"• Trades: {summary['total_trades']} "

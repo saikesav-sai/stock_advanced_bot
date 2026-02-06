@@ -534,16 +534,27 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             if len(session.symbols) > 10:
                 msg += f"• ...and {len(session.symbols) - 10} more\n"
 
-            # Show last used dates if available
+            # Check if we have previous dates in the session (loaded from last config)
             if session.start_date and session.end_date:
-                msg += f"\n<i>Last used: {session.start_date} to {session.end_date}</i>\n"
+                msg += f"\n📅 <b>Date Selection</b>\n\n"
+                msg += f"<b>Previous dates:</b> {session.start_date} to {session.end_date}\n\n"
+                msg += "Do you want to use these dates or enter new ones?"
 
-            msg += "\n📅 <b>Enter Start Date</b>\n\n"
-            msg += "Send the start date in <code>YYYY-MM-DD</code> format.\n\n"
-            msg += "<b>Examples:</b>\n• 2026-01-01\n• 2025-12-01\n\nOr send /cancel to abort."
+                keyboard = [
+                    [InlineKeyboardButton("✅ Use Previous Dates", callback_data="backtest_use_prev_dates")],
+                    [InlineKeyboardButton("📝 Enter New Dates", callback_data="backtest_enter_new_dates")],
+                    [InlineKeyboardButton("🔙 Back", callback_data="backtest_symbol_menu")]
+                ]
+                reply_markup = InlineKeyboardMarkup(keyboard)
+                await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+            else:
+                # No previous dates, go directly to date entry
+                msg += "\n📅 <b>Enter Start Date</b>\n\n"
+                msg += "Send the start date in <code>YYYY-MM-DD</code> format.\n\n"
+                msg += "<b>Examples:</b>\n• 2026-01-01\n• 2025-12-01\n\nOr send /cancel to abort."
 
-            await query.edit_message_text(msg, parse_mode=ParseMode.HTML)
-            return BACKTEST_ENTERING_START_DATE
+                await query.edit_message_text(msg, parse_mode=ParseMode.HTML)
+                return BACKTEST_ENTERING_START_DATE
 
         elif data == "backtest_view_selected":
             session = context.user_data.get('backtest_session')
@@ -596,6 +607,53 @@ async def button_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
             session = context.user_data.get('backtest_session')
             if session:
                 await _show_backtest_symbol_selection(query, controller, session)
+
+        elif data == "backtest_use_prev_dates":
+            session = context.user_data.get('backtest_session')
+            if not session:
+                await query.answer("Session expired. Please start again.", show_alert=True)
+                return
+
+            # Calculate duration
+            start = datetime.strptime(session.start_date, '%Y-%m-%d')
+            end = datetime.strptime(session.end_date, '%Y-%m-%d')
+            days = (end - start).days
+
+            # Show same confirmation summary as normal flow
+            msg = (
+                f"✅ <b>Dates Confirmed</b>\n\n"
+                f"• Start: {session.start_date}\n"
+                f"• End: {session.end_date}\n"
+                f"• Duration: {days} days\n\n"
+                f"💰 <b>Capital Settings</b>\n\n"
+                f"Current defaults:\n"
+                f"• Initial Capital: ₹{session.initial_capital:,.0f}\n"
+                f"• Position Size: ₹{session.position_size:,.0f}\n\n"
+                f"Keep these defaults or customize?"
+            )
+
+            keyboard = [
+                [InlineKeyboardButton("✅ Use Defaults", callback_data="backtest_use_defaults")],
+                [InlineKeyboardButton("✏️ Change Capital", callback_data="backtest_change_capital")],
+                [InlineKeyboardButton("🔙 Cancel", callback_data="backtest_menu")]
+            ]
+            reply_markup = InlineKeyboardMarkup(keyboard)
+            await query.edit_message_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+            return BACKTEST_CONFIRMING
+
+        elif data == "backtest_enter_new_dates":
+            session = context.user_data.get('backtest_session')
+            if not session:
+                await query.answer("Session expired. Please start again.", show_alert=True)
+                return
+
+            msg = (
+                "📅 <b>Enter Start Date</b>\n\n"
+                "Send the start date in <code>YYYY-MM-DD</code> format.\n\n"
+                "<b>Examples:</b>\n• 2026-01-01\n• 2025-12-01\n\nOr send /cancel to abort."
+            )
+            await query.edit_message_text(msg, parse_mode=ParseMode.HTML)
+            return BACKTEST_ENTERING_START_DATE
 
         elif data == "backtest_add_symbol":
             session = context.user_data.get('backtest_session')
@@ -1088,6 +1146,18 @@ async def backtest_capital_handler(update: Update, context: ContextTypes.DEFAULT
 
     capital_text = update.message.text.strip()
 
+    # Check if user wants to skip and use previous value
+    if capital_text.lower() == '/skip':
+        msg = (
+            f"✅ <b>Using Previous Capital:</b> ₹{session.initial_capital:,.0f}\n\n"
+            "💰 <b>Change Position Size</b>\n\n"
+            f"Current: ₹{session.position_size:,.0f}\n\n"
+            "Send the new position size per trade (minimum ₹1,000).\n"
+            "Or send /skip to use current value."
+        )
+        await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
+        return BACKTEST_ENTERING_POSITION_SIZE
+
     try:
         capital = float(capital_text)
 
@@ -1103,8 +1173,8 @@ async def backtest_capital_handler(update: Update, context: ContextTypes.DEFAULT
             f"✅ <b>Capital Set:</b> ₹{capital:,.0f}\n\n"
             "💰 <b>Change Position Size</b>\n\n"
             f"Current: ₹{session.position_size:,.0f}\n\n"
-            "Send the new position size per trade (minimum ₹1,000).\n\n"
-            "<b>Examples:</b>\n• 10000\n• 20000\n• 50000\n\nOr send /cancel to abort."
+            "Send the new position size per trade (minimum ₹1,000).\n"
+            "Or send /skip to use current value."
         )
         await update.message.reply_text(msg, parse_mode=ParseMode.HTML)
         return BACKTEST_ENTERING_POSITION_SIZE
@@ -1131,6 +1201,40 @@ async def backtest_position_handler(update: Update, context: ContextTypes.DEFAUL
         return ConversationHandler.END
 
     position_text = update.message.text.strip()
+
+    # Check if user wants to skip and use previous value
+    if position_text.lower() == '/skip':
+        # Show final confirmation with previous position size
+        lookup = get_lookup()
+        stock_names = []
+        for isin in session.symbols[:5]:
+            name = lookup.get_name_by_isin(isin)
+            stock_names.append(name if name else isin[:12])
+
+        msg = (
+            f"✅ <b>Configuration Complete!</b>\n\n"
+            f"📊 <b>Backtest Summary:</b>\n"
+            f"• Symbols: {len(session.symbols)} stocks\n"
+        )
+        for name in stock_names:
+            msg += f"  - {name}\n"
+        if len(session.symbols) > 5:
+            msg += f"  - ...and {len(session.symbols) - 5} more\n"
+
+        msg += (
+            f"• Period: {session.start_date} to {session.end_date}\n"
+            f"• Capital: ₹{session.initial_capital:,.0f}\n"
+            f"• Position: ₹{session.position_size:,.0f}\n\n"
+            f"Ready to start backtest?"
+        )
+
+        keyboard = [
+            [InlineKeyboardButton("✅ Start Backtest", callback_data="backtest_use_defaults")],
+            [InlineKeyboardButton("🔙 Cancel", callback_data="backtest_menu")]
+        ]
+        reply_markup = InlineKeyboardMarkup(keyboard)
+        await update.message.reply_text(msg, reply_markup=reply_markup, parse_mode=ParseMode.HTML)
+        return BACKTEST_CONFIRMING
 
     try:
         position = float(position_text)
@@ -1574,6 +1678,8 @@ def main():
         entry_points=[
             CallbackQueryHandler(button_handler, pattern="^backtest_add_symbol$"),
             CallbackQueryHandler(button_handler, pattern="^backtest_continue_to_dates$"),
+            CallbackQueryHandler(button_handler, pattern="^backtest_use_prev_dates$"),
+            CallbackQueryHandler(button_handler, pattern="^backtest_enter_new_dates$"),
         ],
         states={
             BACKTEST_SELECTING_SYMBOLS: [
