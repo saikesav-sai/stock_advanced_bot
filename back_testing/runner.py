@@ -27,8 +27,8 @@ class Trade:
     entry_price: float
     side: str  # "LONG" or "SHORT"
     quantity: float
-    sl: float
-    tp: float
+    sl: Optional[float]
+    tp: Optional[float]
     exit_time: Optional[datetime] = None
     exit_price: Optional[float] = None
     exit_reason: Optional[str] = None  # "SL HIT", "TP HIT", "EOD EXIT"
@@ -79,8 +79,8 @@ class Trade:
             'exit_time': self.exit_time.strftime('%Y-%m-%d %H:%M') if self.exit_time else None,
             'exit_price': round(self.exit_price, 2) if self.exit_price else None,
             'quantity': round(self.quantity, 2),
-            'sl': round(self.sl, 2),
-            'tp': round(self.tp, 2),
+            'sl': round(self.sl, 2) if self.sl is not None else None,
+            'tp': round(self.tp, 2) if self.tp is not None else None,
             'net_pnl': round(self.net_pnl, 2) if self.net_pnl else None,
             'pnl_pct': round(self.pnl_pct, 2) if self.pnl_pct else None,
             'duration_minutes': self.duration_minutes,
@@ -125,8 +125,8 @@ class Portfolio:
             Trade object
         """
         entry_price = signal['entry_price']
-        sl = signal['sl']
-        tp = signal['tp']
+        sl = signal.get('sl')
+        tp = signal.get('tp')
         side = "LONG" if signal['signal'] == "BUY" else "SHORT"
 
         # Apply slippage to entry price
@@ -174,8 +174,10 @@ class Portfolio:
         # Store position
         self.position = trade
 
+        sl_text = f"{sl:.2f}" if sl is not None else "N/A"
+        tp_text = f"{tp:.2f}" if tp is not None else "N/A"
         logger.info(f"Opened {side} position: {quantity} @ {entry_price_with_slippage:.2f}, "
-                   f"SL={sl:.2f}, TP={tp:.2f}, Cost={total_cost:.2f}")
+               f"SL={sl_text}, TP={tp_text}, Cost={total_cost:.2f}")
 
         return trade
 
@@ -420,20 +422,7 @@ class BacktestRunner:
 
         # Simulate day by day
         for day_idx, current_date in enumerate(trading_days):
-            # Get PDH/PDL from previous day
-            pdh, pdl = self.data_loader.get_pdh_pdl_for_date(df, current_date)
-
-            if pdh is None or pdl is None:
-                logger.debug(f"No PDH/PDL for {current_date}, skipping")
-                continue
-
-            # Set PDH/PDL in strategy
-            self.strategy.set_pdh_pdl(pdh, pdl)
-
-            # Reset daily state
-            self.strategy.reset_daily_state(current_date)
-
-            logger.debug(f"\nDay {day_idx + 1}/{len(trading_days)}: {current_date}, PDH={pdh:.2f}, PDL={pdl:.2f}")
+            logger.debug(f"\nDay {day_idx + 1}/{len(trading_days)}: {current_date}")
 
             # Get candles for current day
             day_df = df[df['timestamp'].dt.date == current_date].copy()
@@ -450,7 +439,7 @@ class BacktestRunner:
                 # Process candle
                 self._process_candle(row, rolling_df, symbol)
 
-            # End of day: close any open positions
+            # End of day square-off handled by backtest
             if self.portfolio.position:
                 last_candle = day_df.iloc[-1]
                 trade = self.portfolio.close_position(
@@ -460,6 +449,15 @@ class BacktestRunner:
                 )
                 if trade:
                     self.trades.append(trade)
+                if hasattr(self.strategy, 'active_position'):
+                    self.strategy.active_position = None
+
+                # Record post-square-off equity to keep final equity in sync
+                self.equity_curve.append({
+                    'timestamp': last_candle['timestamp'],
+                    'equity': self.portfolio.equity,
+                    'cash': self.portfolio.cash
+                })
 
     def _process_candle(self, row, rolling_df: pd.DataFrame, symbol: str):
         """
@@ -470,25 +468,26 @@ class BacktestRunner:
             rolling_df: Historical data up to current candle
             symbol: Symbol identifier
         """
-        # Check if position open and check SL/TP
-        if self.portfolio.position:
-            exit_signal = self._check_open_position(row)
-            if exit_signal:
-                trade = self.portfolio.close_position(
-                    exit_price=exit_signal['exit_price'],
-                    timestamp=row['timestamp'],
-                    reason=exit_signal['reason']
-                )
-                if trade:
-                    self.trades.append(trade)
+        signal = self.strategy.process(rolling_df, symbol=symbol)
 
-        # If no position, check for entry signal
-        if not self.portfolio.position:
-            signal = self.strategy.process(rolling_df, symbol=symbol)
+        # Strategy-driven exit
+        if signal and signal.get('signal') == 'EXIT' and self.portfolio.position:
+            exit_price = signal.get('exit_price', row['close'])
+            reason = signal.get('reason', 'STRATEGY EXIT')
+            trade = self.portfolio.close_position(
+                exit_price=exit_price,
+                timestamp=row['timestamp'],
+                reason=reason
+            )
+            if trade:
+                self.trades.append(trade)
 
-            if signal and signal['signal'] in ['BUY', 'SELL']:
-                trade = self.portfolio.open_position(signal, row['timestamp'], symbol)
-                # Note: trade will be added to list when closed
+        # Strategy-driven entry
+        if signal and signal.get('signal') in ['BUY', 'SELL'] and not self.portfolio.position:
+            trade = self.portfolio.open_position(signal, row['timestamp'], symbol)
+            if trade is None and hasattr(self.strategy, 'active_position'):
+                # Keep strategy state aligned when entry is rejected (e.g., cash/size constraints).
+                self.strategy.active_position = None
 
         # Update equity curve
         current_equity = self.portfolio.calculate_equity(row['close'])
@@ -498,37 +497,3 @@ class BacktestRunner:
             'cash': self.portfolio.cash
         })
 
-    def _check_open_position(self, row) -> Optional[Dict]:
-        """
-        Check if SL/TP hit for open position
-
-        Args:
-            row: Current candle data
-
-        Returns:
-            dict: Exit signal if position should close, else None
-        """
-        if not self.portfolio.position:
-            return None
-
-        pos = self.portfolio.position
-
-        if pos.side == "LONG":
-            # Check SL first (conservative approach)
-            if row['low'] <= pos.sl:
-                return {"exit_price": pos.sl, "reason": "SL HIT"}
-
-            # Then check TP
-            if row['high'] >= pos.tp:
-                return {"exit_price": pos.tp, "reason": "TP HIT"}
-
-        elif pos.side == "SHORT":
-            # Check SL first
-            if row['high'] >= pos.sl:
-                return {"exit_price": pos.sl, "reason": "SL HIT"}
-
-            # Then check TP
-            if row['low'] <= pos.tp:
-                return {"exit_price": pos.tp, "reason": "TP HIT"}
-
-        return None

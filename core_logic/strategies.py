@@ -1,4 +1,5 @@
 from datetime import datetime
+
 import numpy as np
 import pandas as pd
 
@@ -207,7 +208,6 @@ class Strategy2:
         # Trading hours (you requested 09:20 to 15:30)
         self.trade_start = 920          # allow entries from 09:20
         self.trade_end = 1525           # latest entry time (leave a few minutes buffer)
-        self.hard_exit_time = 1530      # force flat at/after 15:30
 
         # Renko (fixed percent brick to avoid adding ATR indicator)
         self.RENKO_BRICK_PCT = 0.25     # 0.25% brick size
@@ -229,6 +229,10 @@ class Strategy2:
         """Reset daily state when new trading day starts"""
         self.today_date = new_date
         self.active_position = None
+
+    def set_pdh_pdl(self, pdh, pdl):
+        """Set previous day high/low (not used by this strategy, kept for interface compatibility)"""
+        pass
 
     def calculate_indicators(self, df):
         """Calculate technical indicators on the dataframe (no future data)."""
@@ -364,16 +368,6 @@ class Strategy2:
         if self.active_position:
             pos = self.active_position
 
-            # Hard exit at/after market close (intraday-only)
-            if curTime >= self.hard_exit_time:
-                self.active_position = None
-                return {
-                    "signal": "EXIT",
-                    "reason": "HARD EOD EXIT",
-                    "exit_price": row.close,
-                    "side": pos["side"],
-                }
-
             # RMS exits (paper-defined style: MACD cross + slope reversal)
             if pos["side"] == "LONG":
                 if (row.MACD < row.MACD_SIGNAL) and (row.macd_slope < row.signal_slope):
@@ -427,10 +421,6 @@ class Strategy2:
                 "reason": "RMS SHORT (RENKO+MACD+SLOPE)",
             }
 
-        # If we are past hard exit time, ensure no new trades
-        if curTime >= self.hard_exit_time:
-            return None
-
         return None
 
 class Strategy3:
@@ -475,7 +465,6 @@ class Strategy3:
         # ---- Time Windows (HHMM int format) ----
         self.trade_start = 1030         # Earliest new-entry time
         self.trade_end = 1500           # Latest new-entry time
-        self.hard_exit_time = 1510      # Force-close all positions
         self.onfh_time = 1015           # Capture ONFH price at this bar
         self.lunch_start = 1230         # Lunch lull start — no new entries
         self.lunch_end = 1330           # Lunch lull end
@@ -508,6 +497,10 @@ class Strategy3:
         self.renko_ref_price = None
         self.renko_brick_size = None
         self.peak_since_entry = None
+
+    def set_pdh_pdl(self, pdh, pdl):
+        """Set previous day high/low (not used by this strategy, kept for interface compatibility)"""
+        pass
 
     # ------------------------------------------------------------------
     # Indicator calculation
@@ -658,21 +651,11 @@ class Strategy3:
                 if not pd.isna(last_atr) and last_atr > 0:
                     new_brick_size = self.RENKO_ATR_MULT * last_atr
 
-            # Defensive: force-close if position survived overnight
-            had_position = self.active_position is not None
-
             # Reset daily state
             self.reset_daily_state(cur_date)
             self.prev_close = new_prev_close
             self.renko_brick_size = new_brick_size
             self.renko_ref_price = new_prev_close
-
-            if had_position:
-                return {
-                    "signal": "EXIT",
-                    "reason": "DAY CHANGE",
-                    "exit_price": prev.close,
-                }
 
         # ============================================================
         # CURRENT TIME
@@ -760,15 +743,6 @@ class Strategy3:
             pos = self.active_position
             entry = pos["entry"]
             side = pos["side"]
-
-            # --- Time stop (absolute priority) ---
-            if cur_time >= self.hard_exit_time:
-                self.active_position = None
-                return {
-                    "signal": "EXIT",
-                    "reason": "TIME STOP",
-                    "exit_price": row.close,
-                }
 
             # --- Volatility exit ---
             if not atr_exit_ok:
