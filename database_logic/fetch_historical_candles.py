@@ -55,52 +55,49 @@ class UpstoxHistoricalFetcher:
             instrument_key: e.g., "NSE_EQ|INE467B01029" for TCS
             days: Number of days to fetch (default 2)
         """
-        if days is not None:
-            today = datetime.now().date()
-            
+        try:
+            if days is not None:
+                today = datetime.now().date()
+                
+                all_candles = []
+                
+                working_dates = self.fetch_last_n_working_days(days)
+                start_date = working_dates[0].strftime("%Y-%m-%d")
+                end_date = working_dates[-1].strftime("%Y-%m-%d")
+            else:
+                if start_date is None or end_date is None:
+                    logger.error("Either days or both start_date and end_date must be provided")
+                    return []
+                # start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
+                # end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
+                
+                
             all_candles = []
             
-            working_dates = self.fetch_last_n_working_days(days)
-        else:
-            if start_date is None or end_date is None:
-                logger.error("Either days or both start_date and end_date must be provided")
-                return []
+                
+            logger.info(f"Fetching candles from  {start_date} to {end_date}...")
             
-            start_dt = datetime.strptime(start_date, "%Y-%m-%d").date()
-            end_dt = datetime.strptime(end_date, "%Y-%m-%d").date()
-            
-            # Generate list of working dates between start_date and end_date
-            working_dates = []
-            current_date = start_dt
-            while current_date <= end_dt:
-                if current_date.weekday() < 5:  # Monday to Friday
-                    working_dates.append(current_date)
-                current_date += timedelta(days=1)
-            
-            all_candles = []
-        
-        for target_date in working_dates:
-            
-            logger.info(f"Fetching candles for {target_date}...")
-            
-            candles = self._fetch_single_day(instrument_key, target_date)
+            candles = self.fetch_candles(instrument_key, start_date, end_date)
             
             if candles:
                 candles.reverse()
                 all_candles.extend(candles)
-                logger.info(f"✓ Fetched {len(candles)} candles for {target_date} (Trading day {working_dates.index(target_date)+1}/{days})")
+                logger.info(f"✓ Fetched {len(candles)} candles for {start_date} to {end_date}")
             else:
-                logger.warning(f"✗ No candles found for {target_date}")
-        
-        if days is not None:
-            logger.info("Fetching todays candles...")
-            candles_today = self._fetch_today(instrument_key)
-            candles_today.reverse()
-            if candles_today:
-                all_candles.extend(candles_today)
-                logger.info(f"✓ Fetched {len(candles_today)} candles for today ({today})")
-            else:
-                logger.warning(f"✗ No candles found for today ({today})")
+                logger.warning(f"✗ No candles found for {start_date} to {end_date}")
+            
+            if days is not None:
+                logger.info("Fetching todays candles...")
+                candles_today = self._fetch_today(instrument_key)
+                candles_today.reverse()
+                if candles_today:
+                    all_candles.extend(candles_today)
+                    logger.info(f"✓ Fetched {len(candles_today)} candles for today ({today})")
+                else:
+                    logger.warning(f"✗ No candles found for today ({today})")
+        except Exception as e:
+            logger.error(f"got it fetching candles: {e}", exc_info=True)
+            return []
         
 
         # Store in database
@@ -112,6 +109,8 @@ class UpstoxHistoricalFetcher:
             for candle in all_candles:
                 candle['symbol'] = symbol
             
+            # sort the candles by timestamp before storing
+            all_candles.sort(key=lambda x: x['timestamp'])
             self.db.insert_candles_batch(all_candles)
             logger.info(f"✓ Total {len(all_candles)} candles stored in database")
         else:
@@ -184,16 +183,43 @@ class UpstoxHistoricalFetcher:
             logger.error(f"Exception: {e}")
             return []
 
-    def _fetch_single_day(self, instrument_key: str, date: datetime.date):
+    def fetch_candles(self, instrument_key: str,from_date: str, to_date: str):
+        """ 
+        Fetch 5 min candles for a single month because upstox provides monthly historical data usnig this url
+        https://api.upstox.com/v3/historical-candle/NSE_EQ%7CINE848E01016/minutes/5/2025-01-05/2025-01-01
+        --header 'Content-Type: application/json' \
+        --header 'Accept: application/json' \
+        --header 'Authorization: Bearer {your_access_token}'
+
+        Unit	Interval Options	Historical Availability	Max retrieval record limit
+        minutes	1, 2, ... 300	Available from January, 2022	1 month - Applicable for intervals ranging from 1 to 15 minutes.
+        1 quarter - Used for intervals greater than 15 minutes, up to the specified to_date.
+        """
+        candles = []
+        #if from_date and to_date are in the same month, we can fetch data in one call, otherwise we need to fetch month by month
+        from_dt = datetime.strptime(from_date, "%Y-%m-%d").date()
+        to_dt = datetime.strptime(to_date, "%Y-%m-%d").date()
+        if from_dt.year == to_dt.year and from_dt.month == to_dt.month:
+            candles.extend(self._fetch_single_day(instrument_key, from_dt, to_dt))
+        else:
+            current_dt = from_dt
+            while current_dt <= to_dt:
+                month_end = (current_dt.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+                if month_end > to_dt:
+                    month_end = to_dt
+                candles.extend(self._fetch_single_day(instrument_key, current_dt, month_end))
+                current_dt = month_end + timedelta(days=1)
+        return candles
+            
+    def _fetch_single_day(self, instrument_key: str, from_date: str, to_date: str):
         """
         Fetch n-minute candles for a single day
         
         Upstox API format: /instrument_key/interval/to_date/from_date
         Example: /NSE_EQ|INE467B01029/minutes/1/2025-01-02/2025-01-01
         """
-        # Format dates as YYYY-MM-DD
-        to_date = date.strftime("%Y-%m-%d")
-        from_date = date.strftime("%Y-%m-%d")
+        from_date_str = from_date.strftime("%Y-%m-%d") if isinstance(from_date, datetime) else from_date
+        to_date_str = to_date.strftime("%Y-%m-%d") if isinstance(to_date, datetime) else to_date
         
         # URL encode the instrument key
         encoded_key = requests.utils.quote(instrument_key, safe='')

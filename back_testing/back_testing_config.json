@@ -6,8 +6,8 @@
     "data": {
       "symbols": ["INE245A01021","INE171A01029","INE257A01026","INE053F01010"],
       "symbols1": ["INE692A01016"],
-      "start_date": "2026-01-01",
-      "end_date": "2026-01-31",
+      "start_date": "2025-01-01",
+      "end_date": "2025-02-15",
       "interval": "5",
       "database_path": "back_testing_market_data.db",
       "auto_fetch": true,
