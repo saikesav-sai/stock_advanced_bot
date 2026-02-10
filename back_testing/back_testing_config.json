@@ -4,19 +4,25 @@
     "description": "PDH/PDL Breakout Strategy Validation",
 
     "data": {
-      "symbols": ["INE245A01021","INE171A01029","INE257A01026","INE053F01010"],
-      "symbols1": ["INE692A01016"],
+      "stock_names": "Reliance Power, Vodafone Idea, Tata Steel, Hindalco",
+      "symbols": ["INE614G01033","INE669E01016","INE081A01020","INE038A01020"],
+      "symbols1": ["INE614G01033","INE669E01016","INE081A01020","INE038A01020","INE062A01020","INE256A01028","INE242A01010","INE171A01029","INE257A01026","INE092T01019"],
       "start_date": "2025-01-01",
       "end_date": "2025-02-15",
       "interval": "5",
       "database_path": "back_testing_market_data.db",
       "auto_fetch": true,
       "instrument_keys": {
-        "INE245A01021": "NSE_EQ|INE245A01021",
+        "INE614G01033": "NSE_EQ|INE614G01033",
+        "INE669E01016": "NSE_EQ|INE669E01016",
+        "INE081A01020": "NSE_EQ|INE081A01020",
+        "INE038A01020": "NSE_EQ|INE038A01020",
+        "INE062A01020": "NSE_EQ|INE062A01020",
+        "INE256A01028": "NSE_EQ|INE256A01028",
+        "INE242A01010": "NSE_EQ|INE242A01010",
         "INE171A01029": "NSE_EQ|INE171A01029",
         "INE257A01026": "NSE_EQ|INE257A01026",
-        "INE053F01010": "NSE_EQ|INE053F01010",
-        "INE692A01016": "NSE_EQ|INE692A01016"
+        "INE092T01019": "NSE_EQ|INE092T01019"
       }
     },
 

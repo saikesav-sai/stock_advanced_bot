@@ -50,7 +50,7 @@ class CandleDB:
     
     def insert_candle(self, symbol: str, timestamp: datetime, 
                      open_price: float, high: float, low: float, 
-                     close: float, volume: int, interval: str = os.getenv("INTERVAL", "5m")):
+                     close: float, volume: int, interval: str = os.getenv("INTERVAL", "5")):
         """Insert a single candle"""
         cursor = self.conn.cursor()
         
@@ -110,7 +110,7 @@ class CandleDB:
         logger.info(f"Inserted {len(candles)} candles")
     
     def get_candles(self, symbol: str, start_date:str = None, 
-                   end_date: str = None, interval: str = os.getenv("INTERVAL", "5m")) -> pd.DataFrame:
+                   end_date: str = None, interval: str = os.getenv("INTERVAL", "5")) -> pd.DataFrame:
         """Get candles for a symbol within date range"""
         query = """
             SELECT  timestamp, open, high, low, close, volume
@@ -140,7 +140,7 @@ class CandleDB:
         
         return df
     
-    def get_previous_day_high_low(self, symbol: str, current_date: str, interval: str = os.getenv("INTERVAL", "5m")) -> tuple:
+    def get_previous_day_high_low(self, symbol: str, current_date: str, interval: str = os.getenv("INTERVAL", "5")) -> tuple:
         """Get previous day high and low"""
         current = datetime.strptime(current_date, "%Y-%m-%d")
         prev_date = (current - timedelta(days=1)).strftime("%Y-%m-%d")
@@ -171,7 +171,7 @@ class CandleDB:
         logger.info(f"Cleaned up {deleted} old candles (before {cutoff_date})")
         return deleted
     
-    def get_latest_candle(self, symbol: str, interval: str = os.getenv("INTERVAL", "5m")) -> Optional[Dict]:
+    def get_latest_candle(self, symbol: str, interval: str = os.getenv("INTERVAL", "5")) -> Optional[Dict]:
         """Get the most recent candle for a symbol"""
         cursor = self.conn.cursor()
         cursor.execute("""
