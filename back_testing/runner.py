@@ -1,7 +1,9 @@
+import copy
 import importlib
 import json
 import os
 import sys
+from concurrent.futures import ProcessPoolExecutor
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -15,6 +17,116 @@ from back_testing.loading_data import BacktestDataLoader
 from core_logic.logger_config import get_logger
 
 logger = get_logger()
+
+
+def _backtest_symbol_worker(args):
+    """
+    Standalone worker function for parallel backtesting of a single symbol.
+    Must be at module level for pickling by ProcessPoolExecutor.
+    """
+    config, symbol, initial_capital = args
+
+    from back_testing.loading_data import BacktestDataLoader
+
+    # Create isolated components
+    db_path = config['data']['database_path']
+    interval = config['data']['interval']
+    auto_fetch = config['data'].get('auto_fetch', True)
+    data_loader = BacktestDataLoader(db_path, interval, auto_fetch=auto_fetch)
+
+    # Strategy
+    module_name = config['strategy']['module']
+    class_name = config['strategy']['class']
+    module = importlib.import_module(module_name)
+    strategy_class = getattr(module, class_name)
+    params = config['strategy'].get('parameters', {})
+    strategy = strategy_class(**params)
+
+    # Portfolio
+    exec_config = config['execution']
+    portfolio = Portfolio(
+        initial_capital=initial_capital,
+        position_size=exec_config['position_size'],
+        commission_pct=exec_config['commission_pct'],
+        slippage_pct=exec_config['slippage_pct']
+    )
+
+    trades = []
+    equity_curve = []
+
+    # Load data
+    start_date = config['data']['start_date']
+    end_date = config['data']['end_date']
+    instrument_keys = config['data'].get('instrument_keys', {})
+    instrument_key = instrument_keys.get(symbol, None)
+
+    df = data_loader.load_data(symbol, start_date, end_date, instrument_key=instrument_key)
+    if len(df) == 0:
+        return symbol, trades, equity_curve, {
+            'trades': [], 'equity_curve': [], 'total_trades': 0,
+            'final_equity': initial_capital, 'net_profit': 0, 'return_pct': 0
+        }
+
+    trading_days = data_loader.get_trading_days(df)
+
+    for current_date in trading_days:
+        day_df = df[df['timestamp'].dt.date == current_date].copy()
+
+        for i in range(len(day_df)):
+            current_idx = day_df.index[i]
+            rolling_df = df.loc[:current_idx].copy()
+            row = day_df.iloc[i]
+
+            signal = strategy.process(rolling_df, symbol=symbol)
+
+            if signal and signal.get('signal') == 'EXIT' and portfolio.position:
+                trade = portfolio.close_position(
+                    exit_price=signal.get('exit_price', row['close']),
+                    timestamp=row['timestamp'],
+                    reason=signal.get('reason', 'STRATEGY EXIT')
+                )
+                if trade:
+                    trades.append(trade)
+
+            if signal and signal.get('signal') in ['BUY', 'SELL'] and not portfolio.position:
+                trade = portfolio.open_position(signal, row['timestamp'], symbol)
+                if trade is None and hasattr(strategy, 'active_position'):
+                    strategy.active_position = None
+
+            equity_curve.append({
+                'timestamp': row['timestamp'],
+                'equity': portfolio.calculate_equity(row['close']),
+                'cash': portfolio.cash
+            })
+
+        # EOD square-off
+        if portfolio.position:
+            last_candle = day_df.iloc[-1]
+            trade = portfolio.close_position(
+                exit_price=last_candle['close'],
+                timestamp=last_candle['timestamp'],
+                reason="EOD EXIT"
+            )
+            if trade:
+                trades.append(trade)
+            if hasattr(strategy, 'active_position'):
+                strategy.active_position = None
+            equity_curve.append({
+                'timestamp': last_candle['timestamp'],
+                'equity': portfolio.equity,
+                'cash': portfolio.cash
+            })
+
+    stock_result = {
+        'trades': trades,
+        'equity_curve': equity_curve,
+        'total_trades': len(trades),
+        'final_equity': portfolio.equity,
+        'net_profit': portfolio.equity - initial_capital,
+        'return_pct': ((portfolio.equity - initial_capital) / initial_capital) * 100
+    }
+
+    return symbol, trades, equity_curve, stock_result
 
 
 @dataclass
@@ -323,45 +435,58 @@ class BacktestRunner:
 
     def run(self):
         """
-        Execute backtest and return results
-
-        Returns:
-            Dict with backtest results
+        Execute backtest and return results.
+        Uses parallel processing when multiple symbols are configured.
         """
         logger.info("=" * 80)
         logger.info("STARTING BACKTEST")
         logger.info("=" * 80)
 
         start_time = datetime.now()
-
-        # Get symbols to test
         symbols = self.config['data']['symbols']
-
-        # Store initial capital for reset
         initial_capital = self.portfolio.initial_capital
 
+        if len(symbols) > 1:
+            self._run_parallel(symbols, initial_capital)
+        else:
+            self._run_sequential(symbols, initial_capital)
+
+        end_time = datetime.now()
+        duration = (end_time - start_time).total_seconds()
+
+        logger.info("\n" + "=" * 80)
+        logger.info(f"BACKTEST COMPLETED in {duration:.2f} seconds")
+        logger.info(f"Total trades across all stocks: {len(self.trades)}")
+        logger.info("=" * 80)
+
+        return {
+            'config': self.config,
+            'trades': self.trades,
+            'equity_curve': self.equity_curve,
+            'initial_capital': initial_capital,
+            'final_equity': self.portfolio.equity,
+            'stock_results': self.stock_results
+        }
+
+    def _run_sequential(self, symbols, initial_capital):
+        """Original sequential symbol processing"""
         for symbol_idx, symbol in enumerate(symbols):
             logger.info(f"\n{'='*60}")
             logger.info(f"Backtesting symbol {symbol_idx + 1}/{len(symbols)}: {symbol}")
             logger.info(f"{'='*60}")
 
-            # Reset portfolio for each stock (fresh capital)
             self.portfolio.cash = initial_capital
             self.portfolio.equity = initial_capital
             self.portfolio.position = None
 
-            # Track starting point for this stock
             stock_start_idx = len(self.trades)
             equity_start_idx = len(self.equity_curve)
 
-            # Run simulation for this symbol
             self._simulate_single_symbol(symbol)
 
-            # Calculate per-stock results
             stock_trades = self.trades[stock_start_idx:]
             stock_equity_curve = self.equity_curve[equity_start_idx:]
 
-            # Store stock-specific results
             self.stock_results[symbol] = {
                 'trades': stock_trades,
                 'equity_curve': stock_equity_curve,
@@ -377,23 +502,35 @@ class BacktestRunner:
             logger.info(f"  Net P&L: ₹{self.portfolio.equity - initial_capital:,.2f}")
             logger.info(f"  Return: {((self.portfolio.equity - initial_capital) / initial_capital) * 100:.2f}%")
 
-        end_time = datetime.now()
-        duration = (end_time - start_time).total_seconds()
+    def _run_parallel(self, symbols, initial_capital):
+        """Parallel symbol processing using multiple CPU cores"""
+        import multiprocessing
+        max_workers = min(len(symbols), multiprocessing.cpu_count())
+        logger.info(f"Running {len(symbols)} symbols in parallel ({max_workers} workers)")
 
-        logger.info("\n" + "=" * 80)
-        logger.info(f"BACKTEST COMPLETED in {duration:.2f} seconds")
-        logger.info(f"Total trades across all stocks: {len(self.trades)}")
-        logger.info("=" * 80)
+        worker_args = [
+            (copy.deepcopy(self.config), symbol, initial_capital)
+            for symbol in symbols
+        ]
 
-        # Return results
-        return {
-            'config': self.config,
-            'trades': self.trades,
-            'equity_curve': self.equity_curve,
-            'initial_capital': initial_capital,
-            'final_equity': self.portfolio.equity,
-            'stock_results': self.stock_results
-        }
+        with ProcessPoolExecutor(max_workers=max_workers) as executor:
+            results = list(executor.map(_backtest_symbol_worker, worker_args))
+
+        # Aggregate results (maintain symbol order)
+        for symbol, trades, equity_curve, stock_result in results:
+            self.trades.extend(trades)
+            self.equity_curve.extend(equity_curve)
+            self.stock_results[symbol] = stock_result
+
+            # Update portfolio to reflect last stock's final equity (for reporting)
+            self.portfolio.equity = stock_result['final_equity']
+            self.portfolio.cash = stock_result['final_equity']
+
+            logger.info(f"\n{symbol} Summary:")
+            logger.info(f"  Trades: {stock_result['total_trades']}")
+            logger.info(f"  Final Equity: ₹{stock_result['final_equity']:,.2f}")
+            logger.info(f"  Net P&L: ₹{stock_result['net_profit']:,.2f}")
+            logger.info(f"  Return: {stock_result['return_pct']:.2f}%")
 
     def _simulate_single_symbol(self, symbol: str):
         """Run strategy on single symbol's data"""

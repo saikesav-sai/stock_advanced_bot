@@ -1,14 +1,14 @@
 {
   "backtest_config": {
-    "name": "Strategy1_Backtest",
-    "description": "PDH/PDL Breakout Strategy Validation",
+    "name": "Strategy3_Backtest",
+    "description": "ORB + ADX + VWAP Breakout Strategy Validation",
 
     "data": {
-      "stock_names": "Reliance Power, Vodafone Idea, Tata Steel, Hindalco",
-      "symbols": ["INE614G01033","INE669E01016","INE081A01020","INE038A01020"],
-      "symbols1": ["INE614G01033","INE669E01016","INE081A01020","INE038A01020","INE062A01020","INE256A01028","INE242A01010","INE171A01029","INE257A01026","INE092T01019"],
-      "start_date": "2025-01-01",
-      "end_date": "2025-02-15",
+      "stock_names": "Reliance Power, Vodafone Idea, Tata Steel, Hindalco, State Bank of India, Zee Entertainment, Indian Oil Corporation, Federal Bank, BHEL, IDFC First Bank",
+      "symbols1": ["INE614G01033","INE669E01016","INE081A01020"],
+      "symbols": ["INE614G01033","INE669E01016","INE081A01020","INE038A01020","INE062A01020","INE256A01028","INE242A01010","INE171A01029","INE257A01026","INE092T01019"],
+      "start_date": "2024-06-01",
+      "end_date": "2024-06-30",
       "interval": "5",
       "database_path": "back_testing_market_data.db",
       "auto_fetch": true,
@@ -33,8 +33,8 @@
     },
 
     "execution": {
-      "initial_capital": 100000,
-      "position_size": 10000,
+      "initial_capital": 10000,
+      "position_size": 1000,
       "commission_pct": 0.05,
       "slippage_pct": 0.05
     },
